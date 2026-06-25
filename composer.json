@@ -1,0 +1,31 @@
+{
+    "name": "aiarmada/references",
+    "description": "Generic reference/source management for Laravel - scholarly references with hierarchical parts support",
+    "type": "library",
+    "license": "MIT",
+    "require": {
+        "php": "^8.4",
+        "spatie/laravel-package-tools": "^1.16",
+        "spatie/laravel-sluggable": "^3.7"
+    },
+    "autoload": {
+        "psr-4": {
+            "AIArmada\\References\\": "src/"
+        },
+        "files": [
+            "src/helpers.php"
+        ]
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "AIArmada\\References\\ReferencesServiceProvider"
+            ]
+        }
+    },
+    "config": {
+        "sort-packages": true
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true
+}
