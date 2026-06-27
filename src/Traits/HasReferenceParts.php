@@ -8,12 +8,13 @@ use AIArmada\References\Enums\ReferencePartType;
 
 trait HasReferenceParts
 {
-    public function getPart(string $type): ?array
+    public function getPart(ReferencePartType | string $type): ?array
     {
         $parts = $this->reference_parts ?? [];
+        $typeValue = $type instanceof ReferencePartType ? $type->value : $type;
 
         foreach ($parts as $part) {
-            if (($part['type'] ?? null) === $type) {
+            if (($part['type'] ?? null) === $typeValue) {
                 return $part;
             }
         }
