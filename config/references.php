@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-$tablePrefix = 'ref_';
+$tablePrefix = '';
 
 return [
     'database' => [

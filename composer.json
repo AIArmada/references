@@ -6,7 +6,7 @@
     "require": {
         "php": "^8.4",
         "spatie/laravel-package-tools": "^1.16",
-        "spatie/laravel-sluggable": "^3.7"
+        "spatie/laravel-sluggable": "^4.0.2"
     },
     "autoload": {
         "psr-4": {
