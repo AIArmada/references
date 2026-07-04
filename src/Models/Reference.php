@@ -35,7 +35,7 @@ use Spatie\Sluggable\SlugOptions;
  * @property-read Reference|null $parent
  * @property-read Collection<int, Reference> $children
  */
-final class Reference extends Model
+class Reference extends Model
 {
     use HasFactory;
     use HasSlug;
