@@ -13,6 +13,8 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Spatie\MediaLibrary\HasMedia;
+use Spatie\MediaLibrary\InteractsWithMedia;
 use Spatie\Sluggable\HasSlug;
 use Spatie\Sluggable\SlugOptions;
 
@@ -35,11 +37,12 @@ use Spatie\Sluggable\SlugOptions;
  * @property-read Reference|null $parent
  * @property-read Collection<int, Reference> $children
  */
-class Reference extends Model
+class Reference extends Model implements HasMedia
 {
     use HasFactory;
     use HasSlug;
     use UsesReferenceUuid;
+    use InteractsWithMedia;
 
     protected $fillable = [
         'type',
@@ -104,5 +107,25 @@ class Reference extends Model
     public function scopeByType(Builder $query, ReferenceType $type): Builder
     {
         return $query->where('type', $type);
+    }
+
+    public function registerMediaCollections(): void
+    {
+        $this->addMediaCollection('front_cover')
+            ->useDisk(config('media-library.disk_name'))
+            ->acceptsMimeTypes(['image/jpeg', 'image/png', 'image/webp'])
+            ->withResponsiveImages()
+            ->singleFile();
+
+        $this->addMediaCollection('back_cover')
+            ->useDisk(config('media-library.disk_name'))
+            ->acceptsMimeTypes(['image/jpeg', 'image/png', 'image/webp'])
+            ->withResponsiveImages()
+            ->singleFile();
+
+        $this->addMediaCollection('gallery')
+            ->useDisk(config('media-library.disk_name'))
+            ->acceptsMimeTypes(['image/jpeg', 'image/png', 'image/webp'])
+            ->withResponsiveImages();
     }
 }
