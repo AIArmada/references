@@ -41,8 +41,8 @@ class Reference extends Model implements HasMedia
 {
     use HasFactory;
     use HasSlug;
-    use UsesReferenceUuid;
     use InteractsWithMedia;
+    use UsesReferenceUuid;
 
     protected $fillable = [
         'type',
