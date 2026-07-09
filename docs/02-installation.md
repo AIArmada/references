@@ -8,12 +8,20 @@ title: Installation
 
 - PHP 8.4+
 - Laravel 13+
-- `spatie/laravel-sluggable`
+- `spatie/laravel-sluggable` ^4
+- `spatie/laravel-medialibrary` ^11
 
 ## Install
 
 ```bash
 composer require aiarmada/references
+```
+
+Ensure Media Library is installed and its migrations are published if your app does not already use it:
+
+```bash
+php artisan vendor:publish --provider="Spatie\MediaLibrary\MediaLibraryServiceProvider" --tag="medialibrary-migrations"
+php artisan migrate
 ```
 
 ## Run migrations

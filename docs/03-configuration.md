@@ -10,15 +10,16 @@ title: Configuration
 
 ```php
 'database' => [
-    'table_prefix' => $tablePrefix,
+    'table_prefix' => '',
     'json_column_type' => env('REFERENCES_JSON_COLUMN_TYPE', 'jsonb'),
     'tables' => [
-        'references' => env('REFERENCES_TABLE_REFERENCES', $tablePrefix . 'references'),
+        'references' => env('REFERENCES_TABLE_REFERENCES', 'references'),
     ],
 ],
 ```
 
-- `database.table_prefix` controls the default `ref_` prefix
+- `database.table_prefix` defaults to an empty string (table name `references` unless overridden)
+- Set a prefix such as `ref_` if you need namespaced table names in a shared database
 - `database.json_column_type` sets the JSON column type used by migrations
 - `database.tables.references` can override the table name entirely
 
@@ -33,3 +34,13 @@ title: Configuration
 
 - `slug.source` selects the model attribute used to generate slugs
 - `slug.max_length` caps the generated slug length
+
+## Media
+
+Media collections are registered on `Reference` and use the disk from `config('media-library.disk_name')`. Accepted mime types are JPEG, PNG, and WebP, with responsive images enabled.
+
+| Collection | Cardinality |
+| --- | --- |
+| `front_cover` | single file |
+| `back_cover` | single file |
+| `gallery` | multiple files |

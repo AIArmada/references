@@ -11,7 +11,7 @@ family: knowledge-and-references
 ## Snapshot
 
 - Composer: `aiarmada/references`
-- Role: Generic reference/source management with slugs, hierarchy, and structured citation parts
+- Role: Generic reference/source management with slugs, hierarchy, structured citation parts, and media covers
 - Search first: `src/Models`, `src/Actions`, `src/Traits`, `src/Enums`, `config`, `docs`
 - Related: `commerce-support`, `events`
 
@@ -25,8 +25,9 @@ family: knowledge-and-references
 
 ## Guardrails
 
-- Owns reference records, slug generation, self-referencing hierarchy, and part helpers.
+- Owns reference records, slug generation, self-referencing hierarchy, part helpers, and media collections on `Reference`.
 - Keeps citation and reference data out of unrelated domain packages unless they deliberately depend on it.
 - Uses UUID primary keys and configurable JSON column types, with no DB foreign keys or cascades.
 - Does not impose tenant ownership by default.
+- Depends on `spatie/laravel-medialibrary` for covers and gallery media.
 - Updates `docs/*.md` in the same pass when public behavior or config changes.

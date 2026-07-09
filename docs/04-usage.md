@@ -67,3 +67,28 @@ $publishedBooks = Reference::query()
     ->byType(ReferenceType::Book)
     ->get();
 ```
+
+## Media covers and gallery
+
+`Reference` implements Spatie Media Library with three collections:
+
+```php
+use AIArmada\References\Models\Reference;
+
+$reference = Reference::query()->findOrFail($id);
+
+$reference
+    ->addMedia($pathToFrontCover)
+    ->toMediaCollection('front_cover');
+
+$reference
+    ->addMedia($pathToBackCover)
+    ->toMediaCollection('back_cover');
+
+$reference
+    ->addMedia($pathToGalleryImage)
+    ->toMediaCollection('gallery');
+
+$frontUrl = $reference->getFirstMediaUrl('front_cover');
+$gallery = $reference->getMedia('gallery');
+```
