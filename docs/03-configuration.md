@@ -11,7 +11,6 @@ title: Configuration
 ```php
 'database' => [
     'table_prefix' => '',
-    'json_column_type' => env('REFERENCES_JSON_COLUMN_TYPE', 'jsonb'),
     'tables' => [
         'references' => env('REFERENCES_TABLE_REFERENCES', 'references'),
     ],
@@ -20,7 +19,7 @@ title: Configuration
 
 - `database.table_prefix` defaults to an empty string (table name `references` unless overridden)
 - Set a prefix such as `ref_` if you need namespaced table names in a shared database
-- `database.json_column_type` sets the JSON column type used by migrations
+- JSON column type is managed by the `commerce_json_column_type('references', 'jsonb')` helper
 - `database.tables.references` can override the table name entirely
 
 ## Slug

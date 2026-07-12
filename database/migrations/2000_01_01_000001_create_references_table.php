@@ -10,7 +10,7 @@ return new class extends Migration
 {
     public function up(): void
     {
-        $jsonType = config('references.database.json_column_type', 'jsonb');
+        $jsonType = commerce_json_column_type('references', 'jsonb');
 
         Schema::create(config('references.database.tables.references', 'ref_references'), function (Blueprint $table) use ($jsonType): void {
             $table->uuid('id')->primary();
