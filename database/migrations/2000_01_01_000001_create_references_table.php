@@ -28,9 +28,14 @@ return new class extends Migration
             $table->foreignUuid('parent_id')->nullable()->index();
             $table->{$jsonType}('reference_parts')->nullable();
             $table->{$jsonType}('metadata')->nullable();
+            $table->string('part_type', 32)->nullable()->index();
+            $table->string('part_number', 50)->nullable();
+            $table->string('part_label', 255)->nullable();
+            $table->boolean('is_canonical')->default(false)->index();
             $table->timestampsTz();
 
             $table->index(['type', 'status']);
+            $table->index(['parent_id', 'part_type', 'part_number']);
         });
     }
 };

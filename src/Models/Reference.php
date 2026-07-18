@@ -34,6 +34,10 @@ use Spatie\Sluggable\SlugOptions;
  * @property string|null $parent_id
  * @property array|null $reference_parts
  * @property array|null $metadata
+ * @property string|null $part_type
+ * @property string|null $part_number
+ * @property string|null $part_label
+ * @property bool $is_canonical
  * @property-read Reference|null $parent
  * @property-read Collection<int, Reference> $children
  */
@@ -59,6 +63,10 @@ class Reference extends Model implements HasMedia
         'parent_id',
         'reference_parts',
         'metadata',
+        'part_type',
+        'part_number',
+        'part_label',
+        'is_canonical',
     ];
 
     public function getTable(): string
@@ -86,6 +94,7 @@ class Reference extends Model implements HasMedia
             'reference_parts' => 'array',
             'metadata' => 'array',
             'year' => 'integer',
+            'is_canonical' => 'boolean',
         ];
     }
 
