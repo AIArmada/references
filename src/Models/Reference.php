@@ -67,6 +67,7 @@ class Reference extends Model implements HasMedia
         'part_number',
         'part_label',
         'is_canonical',
+        'verified_by',
     ];
 
     public function getTable(): string

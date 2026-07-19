@@ -32,6 +32,7 @@ return new class extends Migration
             $table->string('part_number', 50)->nullable();
             $table->string('part_label', 255)->nullable();
             $table->boolean('is_canonical')->default(false)->index();
+            $table->foreignUuid('verified_by')->nullable()->index();
             $table->timestampsTz();
 
             $table->index(['type', 'status']);
