@@ -7,6 +7,7 @@ namespace AIArmada\References\Models;
 use AIArmada\References\Enums\ReferenceStatus;
 use AIArmada\References\Enums\ReferenceType;
 use AIArmada\References\Models\Concerns\UsesReferenceUuid;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -38,6 +39,7 @@ use Spatie\Sluggable\SlugOptions;
  * @property string|null $part_number
  * @property string|null $part_label
  * @property bool $is_canonical
+ * @property CarbonImmutable|null $published_at
  * @property-read Reference|null $parent
  * @property-read Collection<int, Reference> $children
  */
@@ -67,6 +69,7 @@ class Reference extends Model implements HasMedia
         'part_number',
         'part_label',
         'is_canonical',
+        'published_at',
     ];
 
     public function getTable(): string
@@ -91,6 +94,7 @@ class Reference extends Model implements HasMedia
         return [
             'type' => ReferenceType::class,
             'status' => ReferenceStatus::class,
+            'published_at' => 'immutable_datetime',
             'reference_parts' => 'array',
             'metadata' => 'array',
             'year' => 'integer',
