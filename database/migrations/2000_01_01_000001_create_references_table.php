@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
-use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
@@ -12,7 +11,7 @@ return new class extends Migration
     {
         $jsonType = commerce_json_column_type('references', 'jsonb');
 
-        Schema::create(config('references.database.tables.references', 'ref_references'), function (Blueprint $table) use ($jsonType): void {
+        commerce_schema_create_if_missing(config('references.database.tables.references', 'ref_references'), function (Blueprint $table) use ($jsonType): void {
             $table->uuid('id')->primary();
             $table->string('type')->index();
             $table->string('status', 20)->default('draft');

@@ -14,6 +14,9 @@ title: Configuration
     'tables' => [
         'references' => env('REFERENCES_TABLE_REFERENCES', 'references'),
     ],
+    'media' => [
+        'disk' => 'public',
+    ],
 ],
 ```
 
@@ -36,7 +39,7 @@ title: Configuration
 
 ## Media
 
-Media collections are registered on `Reference` and use the disk from `config('media-library.disk_name')`. Accepted mime types are JPEG, PNG, and WebP, with responsive images enabled.
+Media collections are registered on `Reference` and use `config('references.media.disk')`. Accepted mime types are JPEG, PNG, and WebP, with responsive images enabled.
 
 | Collection | Cardinality |
 | --- | --- |

@@ -6,10 +6,10 @@ namespace AIArmada\References\Models;
 
 use AIArmada\References\Enums\ReferenceStatus;
 use AIArmada\References\Enums\ReferenceType;
-use AIArmada\References\Models\Concerns\UsesReferenceUuid;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -47,8 +47,8 @@ class Reference extends Model implements HasMedia
 {
     use HasFactory;
     use HasSlug;
+    use HasUuids;
     use InteractsWithMedia;
-    use UsesReferenceUuid;
 
     protected $fillable = [
         'type',
@@ -71,6 +71,13 @@ class Reference extends Model implements HasMedia
         'is_canonical',
         'published_at',
     ];
+
+    protected static function booted(): void
+    {
+        static::deleting(function (Reference $reference): void {
+            $reference->children()->get()->each->delete();
+        });
+    }
 
     public function getTable(): string
     {
@@ -125,19 +132,19 @@ class Reference extends Model implements HasMedia
     public function registerMediaCollections(): void
     {
         $this->addMediaCollection('front_cover')
-            ->useDisk(config('media-library.disk_name'))
+            ->useDisk(config('references.media.disk'))
             ->acceptsMimeTypes(['image/jpeg', 'image/png', 'image/webp'])
             ->withResponsiveImages()
             ->singleFile();
 
         $this->addMediaCollection('back_cover')
-            ->useDisk(config('media-library.disk_name'))
+            ->useDisk(config('references.media.disk'))
             ->acceptsMimeTypes(['image/jpeg', 'image/png', 'image/webp'])
             ->withResponsiveImages()
             ->singleFile();
 
         $this->addMediaCollection('gallery')
-            ->useDisk(config('media-library.disk_name'))
+            ->useDisk(config('references.media.disk'))
             ->acceptsMimeTypes(['image/jpeg', 'image/png', 'image/webp'])
             ->withResponsiveImages();
     }
