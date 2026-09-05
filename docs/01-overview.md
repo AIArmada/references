@@ -43,9 +43,10 @@ title: Overview
 
 | Surface | Purpose |
 | --- | --- |
-| `Models\Reference` | Stores reference data, hierarchy, and media collections |
+| `Models\Reference` | Stores reference data, hierarchy, slugs (via Spatie `HasSlug`), and media collections |
 | `Traits\HasReferenceParts` | Adds helpers for reading and mutating structured parts |
-| `Actions\GenerateReferenceSlugAction` | Resolves a unique slug from a configurable source field |
+
+Slugs are generated on the model itself with `spatie/laravel-sluggable` (`HasSlug` + `SlugOptions`); there is no `Actions\GenerateReferenceSlugAction` class (`src/Actions/` is intentionally empty).
 
 ## Requirements
 
