@@ -29,13 +29,16 @@ keywords:
 6. `docs/02-installation.md` when setup or publishing changes are involved
 
 ## Guardrails
-- Owns models, actions, services, events, calculations, and persistence rules.
+- Owns owner-scoped reference models, hierarchy integrity, JSON reference parts,
+  media collections, and persistence rules.
 - Update `docs/*.md` in the same pass when public behavior or config changes.
 
 ## Decide fast
 - Use when: Citations or reference hierarchies.
-- Skip when: No owner scope, no admin UI ships.
-- Owner/security: No owner scope by design.
+- Skip when: No reference or citation domain is involved.
+- Owner/security: `references.owner` uses commerce-support's `HasOwner` and
+  `OwnerScope`; it is enabled by default. Set it to `false` only for an
+  intentionally global installation.
 
 ## Key surfaces
 - Models: `Reference`

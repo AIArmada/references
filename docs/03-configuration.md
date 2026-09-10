@@ -4,7 +4,7 @@ title: Configuration
 
 # Configuration
 
-`config/references.php` controls the references table name, JSON column type, and slug generation defaults.
+`config/references.php` controls the references table name, JSON column type, owner boundary, and slug generation defaults.
 
 ## Database
 
@@ -24,6 +24,21 @@ title: Configuration
 - Set a prefix such as `ref_` if you need namespaced table names in a shared database
 - JSON column type is managed by the `commerce_json_column_type('references', 'jsonb')` helper
 - `database.tables.references` can override the table name entirely
+
+## Owner scoping
+
+```php
+'owner' => [
+    'enabled' => env('REFERENCES_OWNER_ENABLED', true),
+    'include_global' => env('REFERENCES_OWNER_INCLUDE_GLOBAL', false),
+    'auto_assign_on_create' => env('REFERENCES_OWNER_AUTO_ASSIGN_ON_CREATE', true),
+],
+```
+
+- `owner.enabled` enables the shared `commerce-support` owner scope
+- `owner.include_global` must be enabled explicitly when owner queries should include global rows
+- `owner.auto_assign_on_create` controls inheritance of the current owner for new references
+- Bind `OwnerResolverInterface` in the host application and use `OwnerContext::withOwner()` for scoped work
 
 ## Slug
 

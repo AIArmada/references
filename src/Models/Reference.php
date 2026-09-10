@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace AIArmada\References\Models;
 
+use AIArmada\CommerceSupport\Support\OwnerWriteGuard;
+use AIArmada\CommerceSupport\Traits\HasOwner;
+use AIArmada\CommerceSupport\Traits\HasOwnerScopeConfig;
 use AIArmada\References\Enums\ReferenceStatus;
 use AIArmada\References\Enums\ReferenceType;
 use Carbon\CarbonImmutable;
@@ -14,8 +17,10 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use InvalidArgumentException;
 use Spatie\MediaLibrary\HasMedia;
 use Spatie\MediaLibrary\InteractsWithMedia;
+use Spatie\MediaLibrary\MediaCollections\Models\Media;
 use Spatie\Sluggable\HasSlug;
 use Spatie\Sluggable\SlugOptions;
 
@@ -35,9 +40,6 @@ use Spatie\Sluggable\SlugOptions;
  * @property string|null $parent_id
  * @property array|null $reference_parts
  * @property array|null $metadata
- * @property string|null $part_type
- * @property string|null $part_number
- * @property string|null $part_label
  * @property bool $is_canonical
  * @property CarbonImmutable|null $published_at
  * @property-read Reference|null $parent
@@ -46,9 +48,13 @@ use Spatie\Sluggable\SlugOptions;
 class Reference extends Model implements HasMedia
 {
     use HasFactory;
+    use HasOwner;
+    use HasOwnerScopeConfig;
     use HasSlug;
     use HasUuids;
     use InteractsWithMedia;
+
+    protected static string $ownerScopeConfigKey = 'references.owner';
 
     protected $fillable = [
         'type',
@@ -65,17 +71,53 @@ class Reference extends Model implements HasMedia
         'parent_id',
         'reference_parts',
         'metadata',
-        'part_type',
-        'part_number',
-        'part_label',
         'is_canonical',
         'published_at',
     ];
 
     protected static function booted(): void
     {
-        static::deleting(function (Reference $reference): void {
-            $reference->children()->get()->each->delete();
+        static::saving(function (Reference $reference): void {
+            $parentId = $reference->getAttribute('parent_id');
+
+            if ($parentId === null || ! (bool) config('references.owner.enabled', false)) {
+                return;
+            }
+
+            OwnerWriteGuard::findOrFailForOwner(
+                self::class,
+                (string) $parentId,
+                includeGlobal: (bool) config('references.owner.include_global', false),
+            );
+        });
+    }
+
+    public function delete(): ?bool
+    {
+        if (! $this->exists) {
+            return null;
+        }
+
+        return $this->getConnection()->transaction(function (): ?bool {
+            if ($this->fireModelEvent('deleting') === false) {
+                return false;
+            }
+
+            $referenceIds = $this->collectSubtreeIds();
+
+            Media::query()
+                ->where('model_type', $this->getMorphClass())
+                ->whereIn('model_id', $referenceIds)
+                ->get()
+                ->each(static fn (Media $media): ?bool => $media->delete());
+
+            $deleted = static::query()
+                ->whereKey($referenceIds)
+                ->delete();
+
+            $this->fireModelEvent('deleted', false);
+
+            return $deleted > 0;
         });
     }
 
@@ -86,8 +128,46 @@ class Reference extends Model implements HasMedia
 
     public function getSlugOptions(): SlugOptions
     {
-        $source = config('references.slug.source', 'title');
-        $maxLength = (int) config('references.slug.max_length', 200);
+        $source = config('references.slug.source');
+
+        if (! is_string($source) || $source === '' || ! in_array($source, $this->getFillable(), true)) {
+            throw new InvalidArgumentException('references.slug.source must name a fillable reference attribute.');
+        }
+
+        $cast = $this->getCasts()[$source] ?? null;
+        $nonStringCasts = [
+            'array',
+            'bool',
+            'boolean',
+            'collection',
+            'date',
+            'datetime',
+            'decimal',
+            'double',
+            'float',
+            'immutable_date',
+            'immutable_datetime',
+            'int',
+            'integer',
+            'json',
+            'real',
+        ];
+
+        if (is_string($cast) && (in_array($cast, $nonStringCasts, true) || enum_exists($cast))) {
+            throw new InvalidArgumentException('references.slug.source must name a string reference attribute.');
+        }
+
+        $maxLength = config('references.slug.max_length');
+
+        if (! is_int($maxLength) && ! is_numeric($maxLength)) {
+            throw new InvalidArgumentException('references.slug.max_length must be a positive integer.');
+        }
+
+        $maxLength = (int) $maxLength;
+
+        if ($maxLength < 1) {
+            throw new InvalidArgumentException('references.slug.max_length must be a positive integer.');
+        }
 
         return SlugOptions::create()
             ->generateSlugsFrom($source)
@@ -147,5 +227,35 @@ class Reference extends Model implements HasMedia
             ->useDisk(config('references.media.disk'))
             ->acceptsMimeTypes(['image/jpeg', 'image/png', 'image/webp'])
             ->withResponsiveImages();
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function collectSubtreeIds(): array
+    {
+        $ids = [(string) $this->getKey()];
+        $frontier = $ids;
+
+        while ($frontier !== []) {
+            $childIds = static::query()
+                ->whereIn('parent_id', $frontier)
+                ->pluck($this->getKeyName())
+                ->map(static fn (mixed $id): string => (string) $id)
+                ->all();
+
+            $frontier = [];
+
+            foreach ($childIds as $childId) {
+                if (in_array($childId, $ids, true)) {
+                    continue;
+                }
+
+                $ids[] = $childId;
+                $frontier[] = $childId;
+            }
+        }
+
+        return $ids;
     }
 }

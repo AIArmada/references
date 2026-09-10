@@ -8,6 +8,10 @@ use AIArmada\References\Enums\ReferencePartType;
 
 trait HasReferenceParts
 {
+    /**
+     * Reference parts are stored in the reference_parts JSON attribute as
+     * `{type, value}` entries. ReferencePartType is the vocabulary only.
+     */
     public function getPart(ReferencePartType | string $type): ?array
     {
         $parts = $this->reference_parts ?? [];

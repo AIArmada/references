@@ -11,7 +11,7 @@ title: Overview
 - Reference records with a type, status, title, slug, and optional metadata
 - Self-referencing parent and child relationships
 - Slug generation rules
-- Structured reference parts such as book sections, pages, chapters, or surah/juz/jilid references
+- Structured `reference_parts` JSON data for book sections, pages, chapters, or surah/juz/jilid references
 - Enum-backed type and status values
 - Media collections for covers and gallery images via Spatie Media Library
 
@@ -19,7 +19,7 @@ title: Overview
 
 - The source material itself
 - Admin UI
-- Tenant ownership or owner-boundary rules
+- Owner resolution itself; it consumes owner context from `commerce-support`
 - Database foreign keys, cascades, or soft deletes
 
 ## Core concepts
@@ -54,3 +54,7 @@ Slugs are generated on the model itself with `spatie/laravel-sluggable` (`HasSlu
 - Laravel 13+
 - `spatie/laravel-sluggable` ^4
 - `spatie/laravel-medialibrary` ^11
+
+## Owner scoping
+
+`Reference` uses `commerce-support`'s `HasOwner` and `HasOwnerScopeConfig` traits. With `references.owner.enabled` enabled (the default), reads use the shared owner scope and new references inherit the current owner inside `OwnerContext`. Use explicit global context for intentional global records; a missing owner is not an all-owner query.

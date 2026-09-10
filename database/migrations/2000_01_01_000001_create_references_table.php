@@ -13,6 +13,7 @@ return new class extends Migration
 
         commerce_schema_create_if_missing(config('references.database.tables.references', 'ref_references'), function (Blueprint $table) use ($jsonType): void {
             $table->uuid('id')->primary();
+            $table->nullableUuidMorphs('owner');
             $table->string('type')->index();
             $table->string('status', 20)->default('draft');
             $table->string('title');
@@ -27,15 +28,11 @@ return new class extends Migration
             $table->foreignUuid('parent_id')->nullable()->index();
             $table->{$jsonType}('reference_parts')->nullable();
             $table->{$jsonType}('metadata')->nullable();
-            $table->string('part_type', 32)->nullable()->index();
-            $table->string('part_number', 50)->nullable();
-            $table->string('part_label', 255)->nullable();
             $table->boolean('is_canonical')->default(false)->index();
             $table->timestampTz('published_at')->nullable();
             $table->timestampsTz();
 
             $table->index(['type', 'status']);
-            $table->index(['parent_id', 'part_type', 'part_number']);
         });
     }
 };
