@@ -62,6 +62,21 @@ $citation->getPartsGrouped();
 
 Parts have one persisted representation: the `reference_parts` JSON attribute. Each entry has a `type` and `value`; `ReferencePartType` supplies the allowed vocabulary and labels.
 
+## Deleting a reference subtree
+
+`Reference::delete()` runs in a transaction: it iteratively collects the full `parent_id` subtree (`collectSubtreeIds()`), deletes each media record individually, then issues one `whereKey($ids)->delete()` for the rows. It is a single bulk delete, not batched/chunked.
+
+```php
+use AIArmada\References\Models\Reference;
+
+$reference = Reference::query()->findOrFail($id);
+$reference->delete(); // children + covers/gallery removed with it
+```
+
+## Slug misconfiguration fails loud
+
+`getSlugOptions()` reads `references.slug.source` and throws `InvalidArgumentException` when the source is missing, non-fillable, non-string-cast, or when `max_length` is not a positive integer. Fix the config value rather than catching the exception.
+
 ## Querying references
 
 ```php

@@ -58,3 +58,5 @@ Slugs are generated on the model itself with `spatie/laravel-sluggable` (`HasSlu
 ## Owner scoping
 
 `Reference` uses `commerce-support`'s `HasOwner` and `HasOwnerScopeConfig` traits. With `references.owner.enabled` enabled (the default), reads use the shared owner scope and new references inherit the current owner inside `OwnerContext`. Use explicit global context for intentional global records; a missing owner is not an all-owner query.
+
+Slugs are globally unique (`$table->string('slug')->unique()`) while reads stay owner-scoped. Treat slug collisions across owners as expected conflicts and pick a distinct slug.

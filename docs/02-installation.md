@@ -8,6 +8,7 @@ title: Installation
 
 - PHP 8.4+
 - Laravel 13+
+- `aiarmada/commerce-support` (standalone installs must require it; owner context, morphs, and JSON helpers come from there)
 - `spatie/laravel-sluggable` ^4
 - `spatie/laravel-medialibrary` ^11
 
