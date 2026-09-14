@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use AIArmada\References\Support\ReferenceIdentityIndexes;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
@@ -11,14 +12,15 @@ return new class extends Migration
     public function up(): void
     {
         $jsonType = commerce_json_column_type('references', 'jsonb');
+        $tableName = (string) config('references.database.tables.references', 'references');
 
-        Schema::create(config('references.database.tables.references', 'ref_references'), function (Blueprint $table) use ($jsonType): void {
+        Schema::create($tableName, function (Blueprint $table) use ($jsonType): void {
             $table->uuid('id')->primary();
             $table->nullableUuidMorphs('owner');
             $table->string('type')->index();
             $table->string('status', 20)->default('draft');
             $table->string('title');
-            $table->string('slug')->unique();
+            $table->string('slug');
             $table->text('author')->nullable();
             $table->string('publisher')->nullable();
             $table->integer('year')->nullable();
@@ -35,5 +37,12 @@ return new class extends Migration
 
             $table->index(['type', 'status']);
         });
+
+        ReferenceIdentityIndexes::owner($tableName, 'slug');
+    }
+
+    public function down(): void
+    {
+        Schema::dropIfExists((string) config('references.database.tables.references', 'references'));
     }
 };

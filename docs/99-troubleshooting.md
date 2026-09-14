@@ -6,7 +6,7 @@ title: Troubleshooting
 
 ## Slugs are duplicated
 
-The package appends a numeric suffix when a slug already exists. If you need a different source field, change `REFERENCES_SLUG_SOURCE`.
+Slugs are unique per owner (plus a separate global namespace) via partial unique indexes, so the same slug can exist under different owners. The slug generator still appends a numeric suffix when a slug already exists anywhere; if you need a different source field, change `REFERENCES_SLUG_SOURCE`.
 
 ## Parent references are not linked
 

@@ -40,37 +40,45 @@ $chapter = OwnerContext::withOwner($owner, fn (): Reference => Reference::create
 $children = OwnerContext::withOwner($owner, fn () => $reference->children()->get());
 ```
 
+Parents are validated on save: the parent must exist, must not be the row itself or one of its descendants, and must belong to the same owner (a global parent is accepted only when `include_global` is enabled).
+
 ## Working with parts
+
+`Reference` uses `HasReferenceParts` directly:
 
 ```php
 use AIArmada\References\Enums\ReferencePartType;
-use AIArmada\References\Traits\HasReferenceParts;
-use Illuminate\Database\Eloquent\Model;
+use AIArmada\References\Models\Reference;
 
-final class Citation extends Model
-{
-    use HasReferenceParts;
-}
+$reference = Reference::query()->findOrFail($id);
 
-$citation->setPart(ReferencePartType::Page, '142');
-$citation->setPart(ReferencePartType::Chapter, '2');
+$reference->setPart(ReferencePartType::Page, '142');
+$reference->setPart(ReferencePartType::Chapter, '2');
 
-$citation->hasPart(ReferencePartType::Page);
-$citation->getPart('page');
-$citation->getPartsGrouped();
+$reference->hasPart(ReferencePartType::Page);
+$reference->getPart('page');
+$reference->getPartsGrouped();
 ```
 
 Parts have one persisted representation: the `reference_parts` JSON attribute. Each entry has a `type` and `value`; `ReferencePartType` supplies the allowed vocabulary and labels.
 
 ## Deleting a reference subtree
 
-`Reference::delete()` runs in a transaction: it iteratively collects the full `parent_id` subtree (`collectSubtreeIds()`), deletes each media record individually, then issues one `whereKey($ids)->delete()` for the rows. It is a single bulk delete, not batched/chunked.
+`Reference::delete()` runs in a transaction: it iteratively collects the full `parent_id` subtree, then removes every row individually, children first, so each row fires its own `deleting`/`deleted` events and carries its media with it. Media deletes are chunked. The cascade covers the whole hierarchy regardless of row scope, and each row is removed inside its own owner context.
 
 ```php
 use AIArmada\References\Models\Reference;
 
 $reference = Reference::query()->findOrFail($id);
 $reference->delete(); // children + covers/gallery removed with it
+```
+
+## Status lifecycle
+
+Use `transitionStatus()` to move between statuses. Publishing stamps `published_at` when empty (direct saves of a `Published` row do the same); returning to draft clears it. Only one canonical reference (`is_canonical`) is allowed per owner.
+
+```php
+$reference->transitionStatus(ReferenceStatus::Published);
 ```
 
 ## Slug misconfiguration fails loud
