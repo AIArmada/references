@@ -40,9 +40,4 @@ return new class extends Migration
 
         ReferenceIdentityIndexes::owner($tableName, 'slug');
     }
-
-    public function down(): void
-    {
-        Schema::dropIfExists((string) config('references.database.tables.references', 'references'));
-    }
 };
