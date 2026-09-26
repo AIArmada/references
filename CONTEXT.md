@@ -42,7 +42,7 @@ keywords:
 
 ## Key surfaces
 - Models: `Reference`
-- Config `references.php`: `database`, `table_prefix`, `json_column_type`, `tables`, `references`, `slug`, `source`, `max_length`, `media`, `disk`
+- Config `references.php`: `database` (`table_prefix`, `json_column_type`, `tables.references`), `owner` (`enabled`, `include_global`, `auto_assign_on_create`), `slug` (`source`, `max_length`), `media.disk`
 
 ## Docs map
 - Start: `01-overview` → `03-configuration` → `04-usage` → `99-troubleshooting`
