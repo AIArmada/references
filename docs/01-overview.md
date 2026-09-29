@@ -46,7 +46,7 @@ title: Overview
 | `Models\Reference` | Stores reference data, hierarchy, slugs (via Spatie `HasSlug`), and media collections |
 | `Traits\HasReferenceParts` | Adds helpers for reading and mutating structured parts |
 
-Slugs are generated on the model itself with `spatie/laravel-sluggable` (`HasSlug` + `SlugOptions`); there is no `Actions\GenerateReferenceSlugAction` class (`src/Actions/` is intentionally empty).
+Slugs are generated on the model itself with `spatie/laravel-sluggable` (`HasSlug` + `SlugOptions`); there is no `Actions\GenerateReferenceSlugAction` class (there is no `src/Actions/` directory).
 
 ## Requirements
 
@@ -59,4 +59,4 @@ Slugs are generated on the model itself with `spatie/laravel-sluggable` (`HasSlu
 
 `Reference` uses `commerce-support`'s `HasOwner` and `HasOwnerScopeConfig` traits. With `references.owner.enabled` enabled (the default), reads use the shared owner scope and new references inherit the current owner inside `OwnerContext`. Use explicit global context for intentional global records; a missing owner is not an all-owner query.
 
-Slugs are unique per owner, with a separate namespace for ownerless (global) rows, enforced by the `references_slug_owner_unique` and `references_slug_global_unique` partial unique indexes, while reads stay owner-scoped. The same slug may therefore exist under two different owners; a global row and an owned row cannot collide.
+Slugs are unique per owner (plus a separate global namespace) via partial unique indexes, while reads stay owner-scoped. The generator still appends a numeric suffix when a slug already exists anywhere; pick a distinct slug when a per-owner conflict is reported.
