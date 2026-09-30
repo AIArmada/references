@@ -50,7 +50,7 @@ Slugs are generated on the model itself with `spatie/laravel-sluggable` (`HasSlu
 
 ## Requirements
 
-- PHP 8.4+
+- PHP 8.5+
 - Laravel 13+
 - `spatie/laravel-sluggable` ^4
 - `spatie/laravel-medialibrary` ^11
