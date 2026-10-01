@@ -14,6 +14,7 @@ title: Configuration
     'json_column_type' => env('REFERENCES_JSON_COLUMN_TYPE', 'jsonb'),
     'tables' => [
         'references' => env('REFERENCES_TABLE_REFERENCES', $tablePrefix . 'references'),
+        'reference_contributors' => env('REFERENCES_TABLE_REFERENCE_CONTRIBUTORS', $tablePrefix . 'reference_contributors'),
     ],
 ],
 ```
@@ -22,6 +23,7 @@ title: Configuration
 - Set a prefix such as `ref_` if you need namespaced table names in a shared database
 - `database.json_column_type` defaults to `jsonb`; migrations resolve it through the `commerce_json_column_type('references', 'jsonb')` helper, which prefers `REFERENCES_JSON_COLUMN_TYPE`, then `COMMERCE_JSON_COLUMN_TYPE`, then the config value
 - `database.tables.references` can override the table name entirely
+- `database.tables.reference_contributors` can override the contributor link table name entirely
 
 ## Owner scoping
 

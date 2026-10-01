@@ -10,6 +10,7 @@ return [
         'json_column_type' => env('REFERENCES_JSON_COLUMN_TYPE', 'jsonb'),
         'tables' => [
             'references' => env('REFERENCES_TABLE_REFERENCES', $tablePrefix . 'references'),
+            'reference_contributors' => env('REFERENCES_TABLE_REFERENCE_CONTRIBUTORS', $tablePrefix . 'reference_contributors'),
         ],
     ],
     'owner' => [

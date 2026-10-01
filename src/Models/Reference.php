@@ -8,8 +8,11 @@ use AIArmada\CommerceSupport\Support\OwnerContext;
 use AIArmada\CommerceSupport\Support\OwnerWriteGuard;
 use AIArmada\CommerceSupport\Traits\HasOwner;
 use AIArmada\CommerceSupport\Traits\HasOwnerScopeConfig;
+use AIArmada\References\Enums\ReferenceContributorRole;
+use AIArmada\References\Enums\ReferenceRecordKind;
 use AIArmada\References\Enums\ReferenceStatus;
 use AIArmada\References\Enums\ReferenceType;
+use AIArmada\References\Rules\Isbn;
 use AIArmada\References\Traits\HasReferenceParts;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
@@ -19,12 +22,15 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
 use Spatie\MediaLibrary\HasMedia;
 use Spatie\MediaLibrary\InteractsWithMedia;
 use Spatie\MediaLibrary\MediaCollections\Models\Media;
 use Spatie\Sluggable\HasSlug;
 use Spatie\Sluggable\SlugOptions;
+use Stringable;
 
 /**
  * @property string $id
@@ -32,7 +38,6 @@ use Spatie\Sluggable\SlugOptions;
  * @property ReferenceStatus $status
  * @property string $title
  * @property string $slug
- * @property string|null $author
  * @property string|null $publisher
  * @property int|null $year
  * @property string|null $isbn
@@ -42,10 +47,13 @@ use Spatie\Sluggable\SlugOptions;
  * @property string|null $parent_id
  * @property array|null $reference_parts
  * @property array|null $metadata
- * @property bool $is_canonical
+ * @property ReferenceRecordKind $record_kind
+ * @property int|null $edition_number
+ * @property string|null $edition_label
  * @property CarbonImmutable|null $published_at
  * @property-read Reference|null $parent
  * @property-read Collection<int, Reference> $children
+ * @property-read Collection<int, ReferenceContributor> $contributors
  */
 class Reference extends Model implements HasMedia
 {
@@ -64,7 +72,6 @@ class Reference extends Model implements HasMedia
         'status',
         'title',
         'slug',
-        'author',
         'publisher',
         'year',
         'isbn',
@@ -74,16 +81,19 @@ class Reference extends Model implements HasMedia
         'parent_id',
         'reference_parts',
         'metadata',
-        'is_canonical',
+        'record_kind',
+        'edition_number',
+        'edition_label',
         'published_at',
     ];
+
+    protected $attributes = ['record_kind' => 'work'];
 
     protected static function booted(): void
     {
         static::saving(function (Reference $reference): void {
             $reference->validateFields();
             $reference->validateParentHierarchy();
-            $reference->guardSingleCanonical();
             $reference->stampPublishedAt();
         });
     }
@@ -123,6 +133,7 @@ class Reference extends Model implements HasMedia
             }
 
             $this->deleteOwnMedia();
+            $this->deleteOwnContributors();
 
             $deleted = $this->newQueryWithoutScopes()->whereKey($this->getKey())->delete();
 
@@ -212,7 +223,8 @@ class Reference extends Model implements HasMedia
             'reference_parts' => 'array',
             'metadata' => 'array',
             'year' => 'integer',
-            'is_canonical' => 'boolean',
+            'record_kind' => ReferenceRecordKind::class,
+            'edition_number' => 'integer',
         ];
     }
 
@@ -224,6 +236,164 @@ class Reference extends Model implements HasMedia
     public function children(): HasMany
     {
         return $this->hasMany(self::class, 'parent_id');
+    }
+
+    /**
+     * @return HasMany<ReferenceContributor, $this>
+     */
+    public function contributors(): HasMany
+    {
+        $table = (new ReferenceContributor)->getTable();
+
+        return $this->hasMany(ReferenceContributor::class, 'reference_id')
+            ->orderBy($table . '.contributor_id')
+            ->orderBy($table . '.id');
+    }
+
+    /**
+     * @return HasMany<ReferenceContributor, $this>
+     */
+    public function contributorsForRole(ReferenceContributorRole | string $role): HasMany
+    {
+        $table = (new ReferenceContributor)->getTable();
+
+        return $this->hasMany(ReferenceContributor::class, 'reference_id')->forRole($role)
+            ->orderBy($table . '.contributor_id')
+            ->orderBy($table . '.id');
+    }
+
+    /**
+     * Replace the contributor links for one role as an unordered set.
+     *
+     * Presentation stays stable by contributor ID; input order is ignored.
+     *
+     * @param  list<string>  $contributorIds
+     */
+    public function syncContributors(ReferenceContributorRole | string $role, string $contributorType, array $contributorIds): static
+    {
+        $roleEnum = $role instanceof ReferenceContributorRole ? $role : ReferenceContributorRole::tryFrom($role);
+
+        if (! $roleEnum instanceof ReferenceContributorRole) {
+            throw new InvalidArgumentException('Unknown reference contributor role.');
+        }
+
+        if (mb_trim($contributorType) === '') {
+            throw new InvalidArgumentException('Reference contributor type must be a non-empty string.');
+        }
+
+        if (! $this->exists) {
+            throw new InvalidArgumentException('Contributors can only be synced on a persisted reference.');
+        }
+
+        $kind = $this->record_kind instanceof ReferenceRecordKind
+            ? $this->record_kind
+            : ReferenceRecordKind::tryFrom((string) ($this->getAttributes()['record_kind'] ?? ''));
+
+        if ($roleEnum === ReferenceContributorRole::Author && $kind !== ReferenceRecordKind::Work) {
+            throw new InvalidArgumentException('Authors can only be stored on works; editions and parts inherit them.');
+        }
+
+        $wantedIds = [];
+
+        foreach ($contributorIds as $contributorId) {
+            $normalized = $contributorId instanceof Stringable ? mb_trim((string) $contributorId) : (is_string($contributorId) ? mb_trim($contributorId) : '');
+
+            if ($normalized === '') {
+                continue;
+            }
+
+            if (! Str::isUuid($normalized)) {
+                throw new InvalidArgumentException('Reference contributor IDs must be UUIDs.');
+            }
+
+            if (! in_array($normalized, $wantedIds, true)) {
+                $wantedIds[] = $normalized;
+            }
+        }
+
+        $this->getConnection()->transaction(function () use ($roleEnum, $contributorType, $wantedIds): void {
+            $existing = $this->contributorsForRole($roleEnum)->get();
+            $wantedKeys = [];
+
+            foreach ($wantedIds as $contributorId) {
+                $wantedKeys[$contributorType . '|' . $contributorId] = true;
+            }
+
+            foreach ($existing as $contributor) {
+                $key = $contributor->contributor_type . '|' . $contributor->contributor_id;
+
+                if (! array_key_exists($key, $wantedKeys)) {
+                    $contributor->delete();
+                }
+            }
+
+            foreach ($wantedIds as $contributorId) {
+                $exists = $existing->contains(fn (ReferenceContributor $candidate): bool => $candidate->contributor_type === $contributorType
+                    && (string) $candidate->contributor_id === $contributorId);
+
+                if ($exists) {
+                    continue;
+                }
+
+                $this->contributors()->create([
+                    'contributor_type' => $contributorType,
+                    'contributor_id' => $contributorId,
+                    'role' => $roleEnum,
+                ]);
+            }
+        });
+
+        $this->unsetRelation('contributors');
+
+        return $this;
+    }
+
+    /**
+     * Resolve the work that owns this record's inherited contributors.
+     */
+    public function effectiveContributorReference(): static
+    {
+        if ((string) ($this->getAttributes()['record_kind'] ?? '') === ReferenceRecordKind::Work->value) {
+            return $this;
+        }
+
+        $seen = [(string) $this->getKey()];
+        $cursor = $this;
+
+        for ($depth = 0; $depth < 10; $depth++) {
+            $parentId = $cursor->parent_id;
+
+            if (! is_string($parentId) || $parentId === '' || in_array($parentId, $seen, true)) {
+                break;
+            }
+
+            $seen[] = $parentId;
+
+            /** @var static|null $parent */
+            $parent = static::query()->withoutOwnerScope()->whereKey($parentId)->first();
+
+            if (! $parent instanceof static) {
+                break;
+            }
+
+            $cursor = $parent;
+
+            if ((string) ($parent->getAttributes()['record_kind'] ?? '') === ReferenceRecordKind::Work->value) {
+                return $parent;
+            }
+        }
+
+        return $this;
+    }
+
+    /**
+     * Contributors inherited from the owning work, stable by contributor ID.
+     *
+     * @return Collection<int, ReferenceContributor>
+     */
+    public function effectiveContributors(ReferenceContributorRole | string $role): Collection
+    {
+        return $this->effectiveContributorReference()->contributorsForRole($role)->with('contributor')->get();
     }
 
     public function scopePublished(Builder $query): Builder
@@ -260,10 +430,32 @@ class Reference extends Model implements HasMedia
     {
         $raw = $this->getAttributes();
 
+        $kind = $raw['record_kind'] ?? null;
+
+        if (! is_string($kind) || ReferenceRecordKind::tryFrom($kind) === null) {
+            throw ValidationException::withMessages(['record_kind' => 'Invalid reference record kind.']);
+        }
+
+        $editionNumber = $raw['edition_number'] ?? null;
+
+        if ($editionNumber !== null && (! (is_int($editionNumber) || (is_string($editionNumber) && ctype_digit($editionNumber))) || (int) $editionNumber < 1 || (int) $editionNumber > 2147483647)) {
+            throw ValidationException::withMessages(['edition_number' => 'The edition number must be a positive integer.']);
+        }
+
+        $editionLabel = $raw['edition_label'] ?? null;
+
+        if ($editionLabel !== null && (! is_string($editionLabel) || mb_strlen($editionLabel) > 255)) {
+            throw ValidationException::withMessages(['edition_label' => 'The edition label must be at most 255 characters.']);
+        }
+
+        if ($kind !== ReferenceRecordKind::Edition->value && ($editionNumber !== null || $editionLabel !== null)) {
+            throw ValidationException::withMessages(['record_kind' => 'Only editions can contain edition fields.']);
+        }
+
         $year = $raw['year'] ?? null;
 
         if ($year !== null && ! (is_int($year) || (is_string($year) && preg_match('/^-?\d+$/', $year) === 1))) {
-            throw new InvalidArgumentException('Invalid year: must be an integer.');
+            throw ValidationException::withMessages(['year' => 'Invalid year: must be an integer.']);
         }
 
         if ($year !== null) {
@@ -271,34 +463,39 @@ class Reference extends Model implements HasMedia
             $maxYear = (int) CarbonImmutable::now()->format('Y') + 5;
 
             if ($yearInt < -3000 || $yearInt > $maxYear) {
-                throw new InvalidArgumentException(sprintf('Invalid year: must be between -3000 and %d.', $maxYear));
+                throw ValidationException::withMessages(['year' => sprintf('Invalid year: must be between -3000 and %d.', $maxYear)]);
             }
         }
 
         $isbn = $this->getAttribute('isbn');
 
-        if ($isbn !== null && (! is_string($isbn) || mb_strlen($isbn) > 20)) {
-            throw new InvalidArgumentException('Invalid isbn: must be a string of at most 20 characters.');
+        if (is_string($isbn)) {
+            $isbn = Isbn::normalize($isbn);
+            $this->setAttribute('isbn', $isbn);
+        }
+
+        if ($isbn !== null && (! is_string($isbn) || ! Isbn::isValid($isbn))) {
+            throw ValidationException::withMessages(['isbn' => 'Invalid isbn: must be a valid ISBN-10 or ISBN-13.']);
         }
 
         $url = $this->getAttribute('url');
 
         if ($url !== null) {
             if (! is_string($url) || mb_strlen($url) > 255 || filter_var($url, FILTER_VALIDATE_URL) === false) {
-                throw new InvalidArgumentException('Invalid url: must be a URL of at most 255 characters.');
+                throw ValidationException::withMessages(['url' => 'Invalid url: must be a URL of at most 255 characters.']);
             }
 
             $scheme = mb_strtolower((string) parse_url($url, PHP_URL_SCHEME));
 
             if (! in_array($scheme, ['http', 'https'], true)) {
-                throw new InvalidArgumentException('Invalid url: only http and https URLs are accepted.');
+                throw ValidationException::withMessages(['url' => 'Invalid url: only http and https URLs are accepted.']);
             }
         }
 
         $language = $this->getAttribute('language');
 
         if ($language !== null && (! is_string($language) || mb_strlen($language) > 10)) {
-            throw new InvalidArgumentException('Invalid language: must be a string of at most 10 characters.');
+            throw ValidationException::withMessages(['language' => 'Invalid language: must be a string of at most 10 characters.']);
         }
 
         foreach (['reference_parts', 'metadata'] as $jsonAttribute) {
@@ -309,13 +506,13 @@ class Reference extends Model implements HasMedia
             }
 
             if (! is_array($decoded)) {
-                throw new InvalidArgumentException(sprintf('Invalid %s: must be a JSON object.', $jsonAttribute));
+                throw ValidationException::withMessages([$jsonAttribute => sprintf('Invalid %s: must be a JSON object.', $jsonAttribute)]);
             }
 
             $encoded = json_encode($decoded);
 
             if ($encoded === false || mb_strlen($encoded) > 65535) {
-                throw new InvalidArgumentException(sprintf('Invalid %s: payload exceeds 64KB.', $jsonAttribute));
+                throw ValidationException::withMessages([$jsonAttribute => sprintf('Invalid %s: payload exceeds 64KB.', $jsonAttribute)]);
             }
         }
     }
@@ -324,11 +521,25 @@ class Reference extends Model implements HasMedia
     {
         $parentId = $this->getAttribute('parent_id');
 
-        if ($parentId === null) {
-            return;
+        $kind = (string) $this->getAttributes()['record_kind'];
+
+        if ($this->exists && $this->isDirty('record_kind')) {
+            $allowedChildren = match ($kind) {
+                'work' => ['edition', 'part'],
+                'edition' => ['part'],
+                default => [],
+            };
+
+            if (static::query()->withoutOwnerScope()->where('parent_id', $this->getKey())->whereNotIn('record_kind', $allowedChildren)->exists()) {
+                throw ValidationException::withMessages(['record_kind' => 'The record kind would invalidate existing children.']);
+            }
         }
 
-        if ($this->exists && ! $this->isDirty('parent_id')) {
+        if ($parentId === null) {
+            if ($kind !== 'work') {
+                throw ValidationException::withMessages(['parent_id' => 'Editions and parts must have a parent reference.']);
+            }
+
             return;
         }
 
@@ -336,14 +547,25 @@ class Reference extends Model implements HasMedia
         $parent = static::query()->withoutOwnerScope()->whereKey($parentId)->first();
 
         if ($parent === null) {
-            throw new InvalidArgumentException('Invalid parent_id: reference not found.');
+            throw ValidationException::withMessages(['parent_id' => 'Invalid parent_id: reference not found.']);
         }
 
         if ($this->exists && (string) $parent->getKey() === (string) $this->getKey()) {
-            throw new InvalidArgumentException('Invalid parent_id: a reference cannot be its own parent.');
+            throw ValidationException::withMessages(['parent_id' => 'Invalid parent_id: a reference cannot be its own parent.']);
         }
 
         $this->rejectHierarchyCycle($parent);
+
+        $parentKind = (string) $parent->getAttributes()['record_kind'];
+        $validParent = match ($kind) {
+            'edition' => $parentKind === 'work',
+            'part' => in_array($parentKind, ['work', 'edition'], true),
+            default => false,
+        };
+
+        if (! $validParent) {
+            throw ValidationException::withMessages(['parent_id' => 'Editions must belong to a work; parts must belong to a work or edition.']);
+        }
 
         if (! (bool) config('references.owner.enabled', false)) {
             return;
@@ -366,7 +588,7 @@ class Reference extends Model implements HasMedia
                 : (string) $selfId === (string) $parent->owner_id);
 
         if (! $sameOwner && ! ($parentGlobal && $includeGlobal)) {
-            throw new InvalidArgumentException('Cross-tenant write blocked: reference parent does not belong to the same owner.');
+            throw ValidationException::withMessages(['parent_id' => 'Cross-tenant write blocked: reference parent does not belong to the same owner.']);
         }
     }
 
@@ -384,7 +606,7 @@ class Reference extends Model implements HasMedia
             $cursorParentId = (string) $cursor->parent_id;
 
             if ($cursorParentId === $selfKey) {
-                throw new InvalidArgumentException('Invalid parent_id: a reference cannot be moved below its own descendant.');
+                throw ValidationException::withMessages(['parent_id' => 'Invalid parent_id: a reference cannot be moved below its own descendant.']);
             }
 
             if (in_array($cursorParentId, $seen, true)) {
@@ -399,35 +621,6 @@ class Reference extends Model implements HasMedia
             if ($cursor === null) {
                 break;
             }
-        }
-    }
-
-    private function guardSingleCanonical(): void
-    {
-        if (! $this->is_canonical) {
-            return;
-        }
-
-        if ($this->exists && ! $this->isDirty('is_canonical')) {
-            return;
-        }
-
-        [$selfType, $selfId] = $this->effectiveOwnerTuple();
-
-        $query = static::query()->withoutOwnerScope()->where('is_canonical', true);
-
-        if ($this->exists) {
-            $query->whereKeyNot($this->getKey());
-        }
-
-        if ($selfType === null || $selfId === null) {
-            $query->whereNull('owner_type')->whereNull('owner_id');
-        } else {
-            $query->where('owner_type', $selfType)->where('owner_id', $selfId);
-        }
-
-        if ($query->exists()) {
-            throw new InvalidArgumentException('Only one canonical reference is allowed per owner.');
         }
     }
 
@@ -470,8 +663,15 @@ class Reference extends Model implements HasMedia
         }
 
         $this->deleteOwnMedia();
+        $this->deleteOwnContributors();
+
         $this->newQueryWithoutScopes()->whereKey($this->getKey())->delete();
         $this->fireModelEvent('deleted', false);
+    }
+
+    private function deleteOwnContributors(): void
+    {
+        ReferenceContributor::query()->where('reference_id', $this->getKey())->delete();
     }
 
     private function deleteOwnMedia(): void
