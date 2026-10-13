@@ -11,7 +11,7 @@ final class Isbn implements ValidationRule
 {
     public static function normalize(string $value): string
     {
-        return strtoupper((string) preg_replace('/[\s-]+/u', '', $value));
+        return mb_strtoupper((string) preg_replace('/[\s-]+/u', '', $value));
     }
 
     public static function isValid(string $value): bool

@@ -26,6 +26,7 @@ $reference = OwnerContext::withOwner($owner, fn (): Reference => Reference::crea
 ```
 
 The slug is generated automatically from the configured source field. When owner mode is enabled, the new row inherits `$owner` and subsequent model queries are owner-scoped.
+Slug uniqueness is owner-scoped; global references have their own uniqueness scope. Identity comparisons are byte-exact across supported databases, so case and trailing spaces are significant.
 
 ## Working with hierarchy
 
