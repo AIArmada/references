@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace AIArmada\References\Support;
 
 use AIArmada\CommerceSupport\Support\ConnectionDriver;
-use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 use RuntimeException;
 
@@ -17,10 +16,6 @@ final class ReferenceIdentityIndexes
     public static function owner(string $tableName, string $identityColumn): void
     {
         $driver = self::driver();
-
-        if (in_array($driver, ['mysql', 'mariadb'], true)) {
-            return;
-        }
 
         self::partial(
             $tableName,
@@ -34,36 +29,6 @@ final class ReferenceIdentityIndexes
             [$identityColumn],
             self::wrap('owner_type') . ' IS NULL AND ' . self::wrap('owner_id') . ' IS NULL AND ' . self::wrap($identityColumn) . ' IS NOT NULL',
         );
-    }
-
-    public static function addOwnerIndexesToBlueprint(Blueprint $table, string $tableName, string $identityColumn): void
-    {
-        $driver = self::driver();
-        if (! in_array($driver, ['mysql', 'mariadb'], true)) {
-            return;
-        }
-
-        $grammar = Schema::getConnection()->getQueryGrammar();
-        $base = self::name($tableName, $identityColumn);
-        foreach (['owner', 'global'] as $scope) {
-            $columns = $scope === 'owner'
-                ? ['owner_type', 'owner_id', $identityColumn]
-                : [$identityColumn];
-            $conditions = $scope === 'owner'
-                ? [$grammar->wrap('owner_type') . ' IS NOT NULL', $grammar->wrap('owner_id') . ' IS NOT NULL']
-                : [$grammar->wrap('owner_type') . ' IS NULL', $grammar->wrap('owner_id') . ' IS NULL'];
-            $packed = 'CONCAT(' . implode(', ', array_merge(...array_map(
-                static fn (string $column): array => [sprintf('CHAR_LENGTH(%s)', $grammar->wrap($column)), "':'", $grammar->wrap($column), "'|'"],
-                $columns,
-            ))) . ')';
-            $indexName = $base . '_' . $scope . '_unique';
-            $packedColumn = $indexName . '_packed';
-            $identityHashColumn = $indexName . '_identity';
-            $table->text($packedColumn)->nullable()->virtualAs($packed)->invisible();
-            $expression = sprintf('CASE WHEN %s THEN SHA2(%s, 256) ELSE NULL END', implode(' AND ', $conditions), $grammar->wrap($packedColumn));
-            $table->string($identityHashColumn, 64)->nullable()->virtualAs($expression)->invisible();
-            $table->unique($identityHashColumn, $indexName);
-        }
     }
 
     /**
@@ -91,7 +56,7 @@ final class ReferenceIdentityIndexes
     {
         $driver = ConnectionDriver::name(Schema::getConnection());
 
-        if (! in_array($driver, ['mysql', 'mariadb', 'pgsql', 'sqlite'], true)) {
+        if (! in_array($driver, ['pgsql', 'sqlite'], true)) {
             throw new RuntimeException(sprintf(
                 'Reference identity migration cannot run on unsupported database driver [%s].',
                 $driver,

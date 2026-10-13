@@ -11,7 +11,7 @@ title: Installation
 - `aiarmada/commerce-support` (standalone installs must require it; owner context, morphs, and JSON helpers come from there)
 - `spatie/laravel-sluggable` ^4
 - `spatie/laravel-medialibrary` ^11
-- MySQL 8.0.23+ or MariaDB 10.4.14+ when using a MySQL-family database
+- PostgreSQL (partial unique indexes are used to enforce reference slug identity)
 
 ## Install
 

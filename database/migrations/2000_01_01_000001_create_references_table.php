@@ -16,28 +16,16 @@ return new class extends Migration
         $tableName = (string) config('references.database.tables.references', 'references');
         $contributorsTable = (string) config('references.database.tables.reference_contributors', 'reference_contributors');
         $driver = ConnectionDriver::name(Schema::getConnection());
-        $connection = Schema::getConnection();
-        $isMysqlFamily = in_array($driver, ['mysql', 'mariadb'], true) || $connection instanceof MySqlConnection;
-        $isMaria = ConnectionDriver::isMariaDb($connection);
-        $identityCollation = $isMaria ? 'utf8mb4_nopad_bin' : ($isMysqlFamily ? 'utf8mb4_0900_bin' : null);
-
-        Schema::create($tableName, function (Blueprint $table) use ($jsonType, $tableName, $identityCollation): void {
+        Schema::create($tableName, function (Blueprint $table) use ($jsonType): void {
             $table->uuid('id')->primary();
-            $ownerType = $table->string('owner_type', 191)->nullable();
-            $ownerId = $table->uuid('owner_id')->nullable();
-            $table->index(['owner_type', 'owner_id']);
+            $table->nullableUuidMorphs('owner');
             $table->string('type')->index();
             $table->string('record_kind', 20)->default('work')->index();
             $table->unsignedInteger('edition_number')->nullable();
             $table->string('edition_label')->nullable();
             $table->string('status', 20)->default('draft');
             $table->string('title');
-            $slug = $table->string('slug');
-            if ($identityCollation !== null) {
-                foreach ([$ownerType, $ownerId, $slug] as $column) {
-                    $column->charset('utf8mb4')->collation($identityCollation);
-                }
-            }
+            $table->string('slug');
             $table->string('publisher')->nullable();
             $table->integer('year')->nullable();
             $table->string('isbn', 20)->nullable();
@@ -51,7 +39,6 @@ return new class extends Migration
             $table->timestampsTz();
 
             $table->index(['type', 'status']);
-            ReferenceIdentityIndexes::addOwnerIndexesToBlueprint($table, $tableName, 'slug');
         });
 
         Schema::create($contributorsTable, function (Blueprint $table): void {
