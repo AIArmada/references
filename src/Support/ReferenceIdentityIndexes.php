@@ -17,31 +17,49 @@ final class ReferenceIdentityIndexes
     {
         $driver = self::driver();
 
-        self::partial(
+        self::unique(
             $tableName,
             self::name($tableName, $identityColumn) . '_owner_unique',
             ['owner_type', 'owner_id', $identityColumn],
             self::wrap('owner_type') . ' IS NOT NULL AND ' . self::wrap('owner_id') . ' IS NOT NULL AND ' . self::wrap($identityColumn) . ' IS NOT NULL',
+            $driver,
         );
-        self::partial(
+        self::unique(
             $tableName,
             self::name($tableName, $identityColumn) . '_global_unique',
             [$identityColumn],
             self::wrap('owner_type') . ' IS NULL AND ' . self::wrap('owner_id') . ' IS NULL AND ' . self::wrap($identityColumn) . ' IS NOT NULL',
+            $driver,
         );
     }
 
     /**
      * @param  list<string>  $columns
      */
-    private static function partial(string $tableName, string $indexName, array $columns, string $predicate): void
-    {
-        if (! Schema::hasTable($tableName) || Schema::hasIndex($tableName, $indexName)) {
+    private static function unique(
+        string $tableName,
+        string $indexName,
+        array $columns,
+        string $predicate,
+        string $driver,
+    ): void {
+        if (! Schema::hasTable($tableName)) {
             return;
         }
 
         $connection = Schema::getConnection();
         $grammar = $connection->getQueryGrammar();
+
+        if (! in_array($driver, ['pgsql', 'sqlite'], true)) {
+            throw new RuntimeException(sprintf(
+                'Reference identity migration cannot run on unsupported database driver [%s].',
+                $driver,
+            ));
+        }
+
+        if (Schema::hasIndex($tableName, $indexName)) {
+            return;
+        }
 
         $connection->statement(sprintf(
             'CREATE UNIQUE INDEX IF NOT EXISTS %s ON %s (%s) WHERE %s',

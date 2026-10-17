@@ -11,7 +11,7 @@ title: Installation
 - `aiarmada/commerce-support` (standalone installs must require it; owner context, morphs, and JSON helpers come from there)
 - `spatie/laravel-sluggable` ^4
 - `spatie/laravel-medialibrary` ^11
-- PostgreSQL (partial unique indexes are used to enforce reference slug identity)
+- PostgreSQL or SQLite (partial unique indexes enforce owner/global reference slug identity)
 
 ## Install
 
