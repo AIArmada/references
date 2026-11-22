@@ -51,6 +51,10 @@ use Stringable;
  * @property int|null $edition_number
  * @property string|null $edition_label
  * @property CarbonImmutable|null $published_at
+ * @property CarbonImmutable|null $verified_at
+ * @property CarbonImmutable|null $rejected_at
+ * @property CarbonImmutable|null $last_state_change_at
+ * @property string|null $verified_by
  * @property-read Reference|null $parent
  * @property-read Collection<int, Reference> $children
  * @property-read Collection<int, ReferenceContributor> $contributors
@@ -85,6 +89,10 @@ class Reference extends Model implements HasMedia
         'edition_number',
         'edition_label',
         'published_at',
+        'verified_at',
+        'rejected_at',
+        'last_state_change_at',
+        'verified_by',
     ];
 
     protected $attributes = ['record_kind' => 'work'];
@@ -220,6 +228,9 @@ class Reference extends Model implements HasMedia
             'type' => ReferenceType::class,
             'status' => ReferenceStatus::class,
             'published_at' => 'immutable_datetime',
+            'verified_at' => 'immutable_datetime',
+            'rejected_at' => 'immutable_datetime',
+            'last_state_change_at' => 'immutable_datetime',
             'reference_parts' => 'array',
             'metadata' => 'array',
             'year' => 'integer',

@@ -36,9 +36,16 @@ return new class extends Migration
             $table->{$jsonType}('reference_parts')->nullable();
             $table->{$jsonType}('metadata')->nullable();
             $table->timestampTz('published_at')->nullable();
+            $table->timestampTz('verified_at')->nullable();
+            $table->timestampTz('rejected_at')->nullable();
+            $table->timestampTz('last_state_change_at')->nullable();
+            $table->foreignUuid('verified_by')->nullable()->index();
             $table->timestampsTz();
 
             $table->index(['type', 'status']);
+            $table->index('status', 'references_status_idx');
+            $table->index(['status', 'published_at'], 'references_status_published_idx');
+            $table->index('updated_at', 'references_updated_at_idx');
         });
 
         Schema::create($contributorsTable, function (Blueprint $table): void {
