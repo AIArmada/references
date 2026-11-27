@@ -17,7 +17,6 @@ use AIArmada\References\Traits\HasReferenceParts;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
-use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -28,7 +27,7 @@ use InvalidArgumentException;
 use Spatie\MediaLibrary\HasMedia;
 use Spatie\MediaLibrary\InteractsWithMedia;
 use Spatie\MediaLibrary\MediaCollections\Models\Media;
-use Spatie\Sluggable\HasSlug;
+use Spatie\Sluggable\HasSlugWithUuids;
 use Spatie\Sluggable\SlugOptions;
 use Stringable;
 
@@ -65,8 +64,7 @@ class Reference extends Model implements HasMedia
     use HasOwner;
     use HasOwnerScopeConfig;
     use HasReferenceParts;
-    use HasSlug;
-    use HasUuids;
+    use HasSlugWithUuids;
     use InteractsWithMedia;
 
     protected static string $ownerScopeConfigKey = 'references.owner';
