@@ -28,6 +28,8 @@ $reference = OwnerContext::withOwner($owner, fn (): Reference => Reference::crea
 The slug is generated automatically from the configured source field. When owner mode is enabled, the new row inherits `$owner` and subsequent model queries are owner-scoped.
 Slug uniqueness is owner-scoped; global references have their own uniqueness scope. Identity comparisons are byte-exact across supported databases, so case and trailing spaces are significant.
 
+`save()`, `saveQuietly()`, and `saveOrIgnore()` all run the same field normalization, hierarchy, owner assignment, and publication checks. Quiet saves still receive owner assignment, slug generation, and validation; bulk query-builder writes bypass model guarantees and are unsupported.
+
 ## Working with hierarchy
 
 ```php
@@ -44,7 +46,7 @@ $children = OwnerContext::withOwner($owner, fn () => $reference->children()->get
 
 Record kind defaults to `work`. An `edition` must belong to a work, while a `part` must belong to a work or edition. A work has no parent. Only editions accept `edition_number` (positive integer) and `edition_label` (maximum 255 characters). Kind changes cannot invalidate existing children.
 
-Parents are validated on save: the parent must exist, must not be the row itself or one of its descendants, and must belong to the same owner (a global parent is accepted only when `include_global` is enabled).
+Saves run inside a transaction and lock the reference tree root before hierarchy changes; unchanged hierarchy saves lock only the record. Status transitions use the same single lock path without refreshing the returned model. Stale hierarchy or publication state is rejected rather than silently overwritten. Parents are validated when hierarchy changes: the parent must exist, must not be the row itself or one of its descendants, and must belong to the same owner (a global parent is accepted only when `include_global` is enabled and include-global matching is not suppressed).
 
 ## Working with parts
 
@@ -71,9 +73,10 @@ Parts have one persisted representation: the `reference_parts` JSON attribute. E
 Authorship is a role on the polymorphic `reference_contributors` table, not a text column. Link any contributor model (persons, institutions, …) with an explicit role; links are an unordered set and read back stable by contributor ID:
 
 ```php
+use AIArmada\References\Actions\SyncReferenceContributors;
 use AIArmada\References\Enums\ReferenceContributorRole;
 
-$reference->syncContributors(ReferenceContributorRole::Author, $author->getMorphClass(), [
+app(SyncReferenceContributors::class)->handle($reference, ReferenceContributorRole::Author, $author->getMorphClass(), [
     (string) $firstAuthor->getKey(),
     (string) $secondAuthor->getKey(),
 ]);
@@ -81,7 +84,9 @@ $reference->syncContributors(ReferenceContributorRole::Author, $author->getMorph
 $authors = $reference->contributorsForRole(ReferenceContributorRole::Author)->with('contributor')->get();
 ```
 
-Works own authorship: the `author` role can only be stored on works, and editions and parts inherit the effective contributors of their root work via `effectiveContributors()`. Other roles (for example an edition editor) may still be stored directly on any record kind. Contributor IDs must be UUIDs.
+Works own authorship: the `author` role can only be stored on works, and editions and parts inherit the effective contributors of their root work via `effectiveContributors()`. Other roles (for example an edition editor) may still be stored directly on any record kind. Contributor IDs must be UUIDs and are normalized to lowercase. Contributor types must resolve to a concrete Eloquent model and are stored using its canonical morph identity. An explicit role is required on every direct write, including `saveQuietly()`.
+
+Contributor targets are validated before they are linked. Connection resolution matches an Eloquent morph relation: a target model with no explicit connection inherits the reference (or contributor link) connection, while a target model with an explicit connection is validated on that connection. A target model that uses `commerce-support`'s `HasOwner` must exist in the active owner scope; shared contributor models without `HasOwner` remain supported. `SyncReferenceContributors` performs one authorized reference lock, validates the target set in 500-ID batches, and replaces the role set with chunked bulk inserts and deletes. Batch size bounds each SQL parameter list; the action still requires the complete target set in memory. The sync path does not dispatch per-link model save/delete events; use individual model writes when link-level listener cancellation is required. Use the sync action for set mutation; individual model mutations remain guarded and require a transaction and matching write-owner context. Contributor queries inherit the owning reference's read scope, and a work with authorship cannot be changed to another record kind until its authors are removed. Sync enforces write-owner context, including explicit global context for global references. A unique index prevents duplicate contributor identities.
 
 ```php
 $editionAuthors = $edition->effectiveContributors(ReferenceContributorRole::Author);
@@ -89,7 +94,15 @@ $editionAuthors = $edition->effectiveContributors(ReferenceContributorRole::Auth
 
 ## Deleting a reference subtree
 
-`Reference::delete()` runs in a transaction: it iteratively collects the full `parent_id` subtree, then removes every row individually, children first, so each row fires its own `deleting`/`deleted` events and carries its media and contributor links with it. Media deletes are chunked. The cascade covers the whole hierarchy regardless of row scope, and each row is removed inside its own owner context.
+`Reference::delete()` delegates its model lifecycle to `DeleteReference`, which runs in a transaction. It locks the tree root, collects the complete `parent_id` subtree, fires every cancellation check before destructive work, and then deletes media rows, contributor links, and reference rows in 500-row batches. Root cancellation returns `false`; descendant cancellation rolls the transaction back. The caller model may be partially loaded and is hydrated from the locked row before events run.
+
+Media rows must use the reference connection so they can join the same transaction. A media model without an explicit connection inherits the reference connection; a configured media model that explicitly uses a different connection is rejected before any cascade writes. Spatie's eager media-delete hook is suppressed for the cascade without permanently changing the caller's preserve-media flag.
+
+Spatie's media files and `deleted` model events are deferred until after the transaction commits, so failures or cancellations leave the database and stored files intact. The original root and descendant owner contexts are captured before deletion and reused for deferred delivery; same-owner nodes reuse the active context, distinct owners are resolved once, and an orphaned owner row fails explicitly instead of being treated as global. A commit that runs under a different ambient owner therefore cannot reassign or globalize the deferred events. The cascade covers the whole hierarchy regardless of row scope, including a global root with owned descendants.
+
+Only model deletion events are deferred; media files and event listeners are delivered best effort after the database commit. A failing deferred listener is reported, and later root or descendant notifications and media-file removal still run. Delivery ends at the commit boundary: out-of-band writes, inconsistent or missing stored owner tuples, and process termination before callbacks run are outside the cascade contract.
+
+`deleteQuietly()` and `Reference::withoutEvents()` suppress both synchronous and deferred model deletion events while still deleting the reference rows and media rows. Calling Spatie's `deletePreservingMedia()` instead deletes the reference rows for the whole locked subtree but deliberately keeps the media rows and files for that subtree; no media connection check is performed because no media rows are touched.
 
 ```php
 use AIArmada\References\Models\Reference;
@@ -100,10 +113,14 @@ $reference->delete(); // children + covers/gallery removed with it
 
 ## Status lifecycle
 
-Use `transitionStatus()` to move between statuses. Publishing stamps `published_at` when empty (direct saves of a `Published` row do the same); returning to draft clears it.
+Use `TransitionReferenceStatus` to move between statuses. Publishing stamps `published_at` when empty; returning to draft clears it. Both rules also apply to direct model saves. The transition uses one transaction and one record lock, then returns the same model instance with updated state. Saves based on stale publication state are rejected; reload the reference before editing.
+
+Bulk query-builder updates and raw SQL bypass reference validation, owner immutability, hierarchy guards, and publication rules; they are unsupported for reference writes.
 
 ```php
-$reference->transitionStatus(ReferenceStatus::Published);
+use AIArmada\References\Actions\TransitionReferenceStatus;
+
+app(TransitionReferenceStatus::class)->handle($reference, ReferenceStatus::Published);
 ```
 
 ## Slug misconfiguration fails loud

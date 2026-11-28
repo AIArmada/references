@@ -20,6 +20,10 @@ Slugs are unique per owner (plus a separate global namespace) via partial unique
 
 Set `REFERENCES_JSON_COLUMN_TYPE` to match your database driver.
 
+## Reference deletion rejects cross-connection media
+
+Reference deletion is one database transaction. If `media-library.media_model` explicitly uses a different connection than the reference, `DeleteReference` throws before writing any rows. Use a media model on the reference connection, or delete the cross-connection media outside the package cascade; the package does not coordinate a two-connection transaction or outbox.
+
 ## Tables are missing
 
 Run the package migrations:

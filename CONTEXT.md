@@ -17,7 +17,7 @@ keywords:
 - Composer: `aiarmada/references`
 - Role: Bibliographic references: sources, slugs, parent/child hierarchy, structured parts, media covers.
 - Triggers: reference, citation, bibliography, slug
-- Search first: `src/Models, src/Traits, config, docs`
+- Search first: `src/Actions, src/Models, src/Traits, config, docs`
 - Related: `events`, `commerce-support`
 
 ## Read next
@@ -41,7 +41,9 @@ keywords:
   intentionally global installation.
 
 ## Key surfaces
-- Models: `Reference`
+- Actions: `SyncReferenceContributors`, `TransitionReferenceStatus`, `DeleteReference`, `LockReferenceTree`
+- Models: `Reference`, `ReferenceContributor`
+- Persistence: `ReferencePersistence`, `ReferenceContributorPersistence`, `ReferenceContributorLinks`
 - Config `references.php`: `database` (`table_prefix`, `json_column_type`, `tables.references`), `owner` (`enabled`, `include_global`, `auto_assign_on_create`), `slug` (`source`, `max_length`), `media.disk`
 
 ## Docs map

@@ -56,6 +56,8 @@ title: Configuration
 
 Media collections are registered on `Reference` and use `config('references.media.disk')`. Accepted mime types are JPEG, PNG, and WebP, with responsive images enabled.
 
+Reference deletion uses the configured `media-library.media_model`. Media models without an explicit connection inherit the reference connection. An explicit media connection is supported only when it resolves to the same connection as the reference; a cross-connection media cascade is rejected before any rows are written because it cannot share the reference transaction.
+
 | Collection | Cardinality |
 | --- | --- |
 | `front_cover` | single file |

@@ -51,14 +51,17 @@ title: Overview
 | `Models\ReferenceContributor` | Stores one polymorphic contributor link (`reference_id`, `contributor_type`/`contributor_id`, `role`) |
 | `Enums\ReferenceContributorRole` | Contributor vocabulary: `author`, `editor`, `translator` |
 | `Traits\HasReferenceParts` | Adds helpers for reading and mutating structured parts |
+| `Actions\SyncReferenceContributors` | Owner-authorized contributor synchronization |
+| `Actions\TransitionReferenceStatus` | Transactional status transitions |
+| `Actions\DeleteReference` | Transactional subtree deletion through the Eloquent lifecycle |
 
-Slugs are generated on the model itself with `spatie/laravel-sluggable` (`HasSlug` + `SlugOptions`); there is no `Actions\GenerateReferenceSlugAction` class (there is no `src/Actions/` directory).
+Slugs are generated on the model itself with `spatie/laravel-sluggable` (`HasSlug` + `SlugOptions`); slug generation remains model-managed.
 
 ## Requirements
 
 - PHP 8.5+
 - Laravel 13+
-- `spatie/laravel-sluggable` ^4
+- `spatie/laravel-sluggable` ^6
 - `spatie/laravel-medialibrary` ^11
 
 ## Owner scoping

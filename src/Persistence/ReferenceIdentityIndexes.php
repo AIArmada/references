@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace AIArmada\References\Support;
+namespace AIArmada\References\Persistence;
 
 use AIArmada\CommerceSupport\Support\ConnectionDriver;
 use Illuminate\Support\Facades\Schema;

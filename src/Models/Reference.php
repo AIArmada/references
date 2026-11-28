@@ -4,32 +4,34 @@ declare(strict_types=1);
 
 namespace AIArmada\References\Models;
 
-use AIArmada\CommerceSupport\Support\OwnerContext;
-use AIArmada\CommerceSupport\Support\OwnerWriteGuard;
+use AIArmada\CommerceSupport\Support\OwnerScopeOverride;
 use AIArmada\CommerceSupport\Traits\HasOwner;
 use AIArmada\CommerceSupport\Traits\HasOwnerScopeConfig;
+use AIArmada\References\Actions\DeleteReference;
+use AIArmada\References\Actions\SaveReference;
 use AIArmada\References\Enums\ReferenceContributorRole;
+use AIArmada\References\Enums\ReferencePartType;
 use AIArmada\References\Enums\ReferenceRecordKind;
 use AIArmada\References\Enums\ReferenceStatus;
 use AIArmada\References\Enums\ReferenceType;
+use AIArmada\References\Persistence\ReferencePersistence;
 use AIArmada\References\Rules\Isbn;
 use AIArmada\References\Traits\HasReferenceParts;
 use Carbon\CarbonImmutable;
+use Closure;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Events\NullDispatcher;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
 use Spatie\MediaLibrary\HasMedia;
 use Spatie\MediaLibrary\InteractsWithMedia;
-use Spatie\MediaLibrary\MediaCollections\Models\Media;
 use Spatie\Sluggable\HasSlugWithUuids;
 use Spatie\Sluggable\SlugOptions;
-use Stringable;
 
 /**
  * @property string $id
@@ -58,7 +60,7 @@ use Stringable;
  * @property-read Collection<int, Reference> $children
  * @property-read Collection<int, ReferenceContributor> $contributors
  */
-class Reference extends Model implements HasMedia
+class Reference extends ReferencePersistence implements HasMedia
 {
     use HasFactory;
     use HasOwner;
@@ -93,81 +95,51 @@ class Reference extends Model implements HasMedia
         'verified_by',
     ];
 
-    protected $attributes = ['record_kind' => 'work'];
+    protected $attributes = ['record_kind' => 'work', 'status' => 'draft'];
 
-    protected static function booted(): void
+    protected function saveReference(Closure $save): bool
     {
-        static::saving(function (Reference $reference): void {
-            $reference->validateFields();
-            $reference->validateParentHierarchy();
-            $reference->stampPublishedAt();
-        });
+        return (new SaveReference)->handle($this, $save);
     }
 
     public function delete(): ?bool
     {
-        if (! $this->exists) {
-            return null;
+        $dispatcher = static::getEventDispatcher();
+        $eventsEnabled = $dispatcher !== null && ! $dispatcher instanceof NullDispatcher;
+
+        return (new DeleteReference)->handle(
+            $this,
+            $eventsEnabled
+                ? fn (Reference $record): bool => $record->fireModelEvent('deleting') !== false
+                : static fn (): bool => true,
+            $eventsEnabled ? fn (Reference $record): mixed => $record->fireModelEvent('deleted', false) : null,
+        );
+    }
+
+    /**
+     * @param  Closure(): mixed  $callback
+     */
+    public function withoutMediaCascadeDeletion(Closure $callback): mixed
+    {
+        $preserveMedia = $this->deletePreservingMedia;
+        $this->deletePreservingMedia = true;
+
+        try {
+            return $callback();
+        } finally {
+            $this->deletePreservingMedia = $preserveMedia;
         }
-
-        return $this->getConnection()->transaction(function (): ?bool {
-            if ($this->fireModelEvent('deleting') === false) {
-                return false;
-            }
-
-            // Descendants go one row at a time, children first, so every row
-            // fires its own model events and carries its media with it. The
-            // cascade is hierarchy-complete by design: this row was obtained
-            // through owner scoping, and no descendant is left orphaned. Each
-            // row is removed inside its own owner context so the write guards
-            // see the scope the row actually belongs to.
-            foreach ($this->childrenFirst($this->collectSubtreeIds()) as $id) {
-                if ((string) $id === (string) $this->getKey()) {
-                    continue;
-                }
-
-                $child = static::query()->withoutOwnerScope()->whereKey($id)->first();
-
-                if ($child instanceof self) {
-                    /** @var Model|null $childOwner */
-                    $childOwner = $child->getAttribute('owner');
-
-                    OwnerContext::withOwner($childOwner, function () use ($child): void {
-                        $child->deleteOwnRow();
-                    });
-                }
-            }
-
-            $this->deleteOwnMedia();
-            $this->deleteOwnContributors();
-
-            $deleted = $this->newQueryWithoutScopes()->whereKey($this->getKey())->delete();
-
-            $this->fireModelEvent('deleted', false);
-
-            return $deleted > 0;
-        });
     }
 
     public function getTable(): string
     {
-        return config('references.database.tables.references', 'references');
-    }
-
-    /**
-     * Move through the status lifecycle, keeping published_at in sync.
-     */
-    public function transitionStatus(ReferenceStatus $status): static
-    {
-        $this->status = $status;
-
-        if ($status === ReferenceStatus::Draft) {
-            $this->published_at = null;
+        if (is_string($this->table) && $this->table !== '') {
+            return $this->table;
         }
 
-        $this->save();
+        $table = config('references.database.tables.references');
 
-        return $this;
+        return is_string($table) && $table !== '' ? $table : 'references';
     }
 
     public function getSlugOptions(): SlugOptions
@@ -272,102 +244,24 @@ class Reference extends Model implements HasMedia
     }
 
     /**
-     * Replace the contributor links for one role as an unordered set.
-     *
-     * Presentation stays stable by contributor ID; input order is ignored.
-     *
-     * @param  list<string>  $contributorIds
-     */
-    public function syncContributors(ReferenceContributorRole | string $role, string $contributorType, array $contributorIds): static
-    {
-        $roleEnum = $role instanceof ReferenceContributorRole ? $role : ReferenceContributorRole::tryFrom($role);
-
-        if (! $roleEnum instanceof ReferenceContributorRole) {
-            throw new InvalidArgumentException('Unknown reference contributor role.');
-        }
-
-        if (mb_trim($contributorType) === '') {
-            throw new InvalidArgumentException('Reference contributor type must be a non-empty string.');
-        }
-
-        if (! $this->exists) {
-            throw new InvalidArgumentException('Contributors can only be synced on a persisted reference.');
-        }
-
-        $kind = $this->record_kind instanceof ReferenceRecordKind
-            ? $this->record_kind
-            : ReferenceRecordKind::tryFrom((string) ($this->getAttributes()['record_kind'] ?? ''));
-
-        if ($roleEnum === ReferenceContributorRole::Author && $kind !== ReferenceRecordKind::Work) {
-            throw new InvalidArgumentException('Authors can only be stored on works; editions and parts inherit them.');
-        }
-
-        $wantedIds = [];
-
-        foreach ($contributorIds as $contributorId) {
-            $normalized = $contributorId instanceof Stringable ? mb_trim((string) $contributorId) : (is_string($contributorId) ? mb_trim($contributorId) : '');
-
-            if ($normalized === '') {
-                continue;
-            }
-
-            if (! Str::isUuid($normalized)) {
-                throw new InvalidArgumentException('Reference contributor IDs must be UUIDs.');
-            }
-
-            if (! in_array($normalized, $wantedIds, true)) {
-                $wantedIds[] = $normalized;
-            }
-        }
-
-        $this->getConnection()->transaction(function () use ($roleEnum, $contributorType, $wantedIds): void {
-            $existing = $this->contributorsForRole($roleEnum)->get();
-            $wantedKeys = [];
-
-            foreach ($wantedIds as $contributorId) {
-                $wantedKeys[$contributorType . '|' . $contributorId] = true;
-            }
-
-            foreach ($existing as $contributor) {
-                $key = $contributor->contributor_type . '|' . $contributor->contributor_id;
-
-                if (! array_key_exists($key, $wantedKeys)) {
-                    $contributor->delete();
-                }
-            }
-
-            foreach ($wantedIds as $contributorId) {
-                $exists = $existing->contains(fn (ReferenceContributor $candidate): bool => $candidate->contributor_type === $contributorType
-                    && (string) $candidate->contributor_id === $contributorId);
-
-                if ($exists) {
-                    continue;
-                }
-
-                $this->contributors()->create([
-                    'contributor_type' => $contributorType,
-                    'contributor_id' => $contributorId,
-                    'role' => $roleEnum,
-                ]);
-            }
-        });
-
-        $this->unsetRelation('contributors');
-
-        return $this;
-    }
-
-    /**
      * Resolve the work that owns this record's inherited contributors.
      */
     public function effectiveContributorReference(): static
     {
-        if ((string) ($this->getAttributes()['record_kind'] ?? '') === ReferenceRecordKind::Work->value) {
-            return $this;
+        $key = $this->getKey();
+
+        if (! $this->exists || ! is_string($key) || ! Str::isUuid($key)) {
+            throw new InvalidArgumentException('A persisted reference UUID is required.');
         }
 
-        $seen = [(string) $this->getKey()];
-        $cursor = $this;
+        $record = $this->newQuery()->findOrFail($key);
+
+        if ($this->isWorkKind($record)) {
+            return $record;
+        }
+
+        $seen = [(string) $record->getKey()];
+        $cursor = $record;
 
         for ($depth = 0; $depth < 10; $depth++) {
             $parentId = $cursor->parent_id;
@@ -377,9 +271,7 @@ class Reference extends Model implements HasMedia
             }
 
             $seen[] = $parentId;
-
-            /** @var static|null $parent */
-            $parent = static::query()->withoutOwnerScope()->whereKey($parentId)->first();
+            $parent = $this->resolveRelatedRecord($parentId, $cursor);
 
             if (! $parent instanceof static) {
                 break;
@@ -387,12 +279,12 @@ class Reference extends Model implements HasMedia
 
             $cursor = $parent;
 
-            if ((string) ($parent->getAttributes()['record_kind'] ?? '') === ReferenceRecordKind::Work->value) {
+            if ($this->isWorkKind($parent)) {
                 return $parent;
             }
         }
 
-        return $this;
+        return $record;
     }
 
     /**
@@ -402,7 +294,14 @@ class Reference extends Model implements HasMedia
      */
     public function effectiveContributors(ReferenceContributorRole | string $role): Collection
     {
-        return $this->effectiveContributorReference()->contributorsForRole($role)->with('contributor')->get();
+        $reference = $this->effectiveContributorReference();
+
+        /** @var Collection<int, ReferenceContributor> $contributors */
+        $contributors = $reference->contributorsForRole($role)
+            ->with('contributor')
+            ->get();
+
+        return $contributors;
     }
 
     public function scopePublished(Builder $query): Builder
@@ -435,9 +334,50 @@ class Reference extends Model implements HasMedia
             ->withResponsiveImages();
     }
 
+    public function prepareForPersistence(): void
+    {
+        $config = static::ownerScopeConfig();
+
+        if ($config->enabled) {
+            if ($this->exists) {
+                static::guardOwnedOwnerWrite($this, $config, 'save');
+                static::guardGlobalOwnerWrite($this, $config, 'save');
+            } else {
+                static::assignOwnerOnCreate($this, $config);
+            }
+        }
+
+        $this->validateFields();
+
+        if (! $this->exists && ($this->getAttribute('slug') === null || $this->getAttribute('slug') === '')) {
+            $this->generateSlugOnCreate();
+        }
+
+        $this->validateHierarchyState();
+        $this->syncPublishedAt();
+    }
+
     private function validateFields(): void
     {
         $raw = $this->getAttributes();
+
+        $type = $raw['type'] ?? null;
+
+        if (! is_string($type) || ReferenceType::tryFrom($type) === null) {
+            throw ValidationException::withMessages(['type' => 'Invalid reference type.']);
+        }
+
+        $status = $raw['status'] ?? null;
+
+        if (! is_string($status) || ReferenceStatus::tryFrom($status) === null) {
+            throw ValidationException::withMessages(['status' => 'Invalid reference status.']);
+        }
+
+        $title = $raw['title'] ?? null;
+
+        if (! is_string($title) || mb_trim($title) === '' || mb_strlen($title) > 255) {
+            throw ValidationException::withMessages(['title' => 'The title is required and must be at most 255 characters.']);
+        }
 
         $kind = $raw['record_kind'] ?? null;
 
@@ -518,6 +458,25 @@ class Reference extends Model implements HasMedia
                 throw ValidationException::withMessages([$jsonAttribute => sprintf('Invalid %s: must be a JSON object.', $jsonAttribute)]);
             }
 
+            if ($jsonAttribute === 'reference_parts') {
+                $seen = [];
+
+                foreach ($decoded as $part) {
+                    $type = is_array($part) ? ($part['type'] ?? null) : null;
+
+                    if (! is_string($type) || ReferencePartType::tryFrom($type) === null
+                        || ! is_string($part['value'] ?? null) || isset($seen[$type])) {
+                        throw ValidationException::withMessages(['reference_parts' => 'Invalid reference_parts: expected unique typed string entries.']);
+                    }
+
+                    $seen[$type] = true;
+                }
+
+                if (! array_is_list($decoded)) {
+                    throw ValidationException::withMessages(['reference_parts' => 'Invalid reference_parts: expected a list.']);
+                }
+            }
+
             $encoded = json_encode($decoded);
 
             if ($encoded === false || mb_strlen($encoded) > 65535) {
@@ -526,11 +485,23 @@ class Reference extends Model implements HasMedia
         }
     }
 
+    private function validateHierarchyState(): void
+    {
+        if (! $this->exists) {
+            $this->validateParentHierarchy();
+
+            return;
+        }
+
+        if ($this->isDirty('parent_id') || $this->isDirty('record_kind')) {
+            $this->validateParentHierarchy();
+        }
+    }
+
     private function validateParentHierarchy(): void
     {
         $parentId = $this->getAttribute('parent_id');
-
-        $kind = (string) $this->getAttributes()['record_kind'];
+        $kind = (string) ($this->getAttributes()['record_kind'] ?? '');
 
         if ($this->exists && $this->isDirty('record_kind')) {
             $allowedChildren = match ($kind) {
@@ -539,8 +510,12 @@ class Reference extends Model implements HasMedia
                 default => [],
             };
 
-            if (static::query()->withoutOwnerScope()->where('parent_id', $this->getKey())->whereNotIn('record_kind', $allowedChildren)->exists()) {
+            if ($this->newQuery()->withoutOwnerScope()->where('parent_id', $this->getKey())->whereNotIn('record_kind', $allowedChildren)->exists()) {
                 throw ValidationException::withMessages(['record_kind' => 'The record kind would invalidate existing children.']);
+            }
+
+            if ($kind !== ReferenceRecordKind::Work->value && $this->contributorsForRole(ReferenceContributorRole::Author)->exists()) {
+                throw ValidationException::withMessages(['record_kind' => 'Remove authorship before changing a work to another record kind.']);
             }
         }
 
@@ -552,11 +527,13 @@ class Reference extends Model implements HasMedia
             return;
         }
 
+        $this->assertParentUuid($parentId);
+
         /** @var Reference|null $parent */
-        $parent = static::query()->withoutOwnerScope()->whereKey($parentId)->first();
+        $parent = $this->newQuery()->withoutOwnerScope()->whereKey($parentId)->first();
 
         if ($parent === null) {
-            throw ValidationException::withMessages(['parent_id' => 'Invalid parent_id: reference not found.']);
+            throw ValidationException::withMessages(['parent_id' => 'Invalid parent_id: reference not found or inaccessible.']);
         }
 
         if ($this->exists && (string) $parent->getKey() === (string) $this->getKey()) {
@@ -576,28 +553,34 @@ class Reference extends Model implements HasMedia
             throw ValidationException::withMessages(['parent_id' => 'Editions must belong to a work; parts must belong to a work or edition.']);
         }
 
-        if (! (bool) config('references.owner.enabled', false)) {
+        $config = static::ownerScopeConfig();
+
+        if (! $config->enabled) {
             return;
         }
 
-        OwnerWriteGuard::findOrFailForOwner(
-            self::class,
-            (string) $parentId,
-            includeGlobal: (bool) config('references.owner.include_global', false),
-        );
+        [$selfType, $selfId] = $this->ownerTuple($this);
+        [$parentType, $parentIdValue] = $this->ownerTuple($parent);
 
-        $parentGlobal = $parent->owner_type === null && $parent->owner_id === null;
-        $includeGlobal = (bool) config('references.owner.include_global', false);
+        if (($selfType === null) !== ($selfId === null) || ($parentType === null) !== ($parentIdValue === null)) {
+            throw ValidationException::withMessages(['parent_id' => 'Reference owner tuple is malformed.']);
+        }
 
-        [$selfType, $selfId] = $this->effectiveOwnerTuple();
+        $parentGlobal = $parentType === null;
+        $sameOwner = $selfType === $parentType
+            && ($selfId === null || $parentIdValue === null
+                ? $selfId === $parentIdValue
+                : (string) $selfId === (string) $parentIdValue);
 
-        $sameOwner = $selfType === $parent->owner_type
-            && ($selfId === null || $parent->owner_id === null
-                ? $selfId === $parent->owner_id
-                : (string) $selfId === (string) $parent->owner_id);
-
-        if (! $sameOwner && ! ($parentGlobal && $includeGlobal)) {
+        if (! $sameOwner && ! ($parentGlobal && $config->includeGlobal && ! OwnerScopeOverride::suppressIncludeGlobal())) {
             throw ValidationException::withMessages(['parent_id' => 'Cross-tenant write blocked: reference parent does not belong to the same owner.']);
+        }
+    }
+
+    private function assertParentUuid(mixed $parentId): void
+    {
+        if (! is_string($parentId) || ! Str::isUuid($parentId)) {
+            throw ValidationException::withMessages(['parent_id' => 'Invalid parent_id: must be a UUID.']);
         }
     }
 
@@ -619,13 +602,12 @@ class Reference extends Model implements HasMedia
             }
 
             if (in_array($cursorParentId, $seen, true)) {
-                break;
+                throw ValidationException::withMessages(['parent_id' => 'Invalid parent_id: existing hierarchy contains a cycle.']);
             }
 
             $seen[] = $cursorParentId;
 
-            /** @var Reference|null $cursor */
-            $cursor = static::query()->withoutOwnerScope()->whereKey($cursorParentId)->first();
+            $cursor = $this->resolveRelatedRecord($cursorParentId, $cursor);
 
             if ($cursor === null) {
                 break;
@@ -633,138 +615,77 @@ class Reference extends Model implements HasMedia
         }
     }
 
-    private function stampPublishedAt(): void
+    private function syncPublishedAt(): void
     {
+        if ($this->status === ReferenceStatus::Draft) {
+            $this->published_at = null;
+
+            return;
+        }
+
         if ($this->status === ReferenceStatus::Published && $this->published_at === null) {
             $this->published_at = CarbonImmutable::now();
         }
     }
 
-    /**
-     * @return array{0: string|null, 1: mixed}
-     */
-    private function effectiveOwnerTuple(): array
+    private function resolveRelatedRecord(string $parentId, Reference $child): ?static
     {
-        if ($this->owner_type !== null && $this->owner_id !== null) {
-            return [$this->owner_type, $this->owner_id];
+        if (! Str::isUuid($parentId)) {
+            throw new InvalidArgumentException('Reference parent_id must be a UUID.');
         }
 
-        if ($this->exists) {
-            return [$this->owner_type, $this->owner_id];
+        /** @var static|null $parent */
+        $parent = $this->newQuery()->find($parentId);
+
+        if (! $parent instanceof static) {
+            return null;
         }
 
-        $owner = OwnerContext::resolve();
+        $config = static::ownerScopeConfig();
 
-        if ($owner === null) {
-            return [null, null];
+        if (! $config->enabled) {
+            return $parent;
         }
 
-        return [$owner->getMorphClass(), $owner->getKey()];
-    }
+        [$childType, $childId] = $this->ownerTuple($child);
+        [$parentType, $parentIdValue] = $this->ownerTuple($parent);
 
-    /**
-     * Delete one row with its media and events (no subtree walk).
-     */
-    private function deleteOwnRow(): void
-    {
-        if ($this->fireModelEvent('deleting') === false) {
-            return;
+        if (($childType === null) !== ($childId === null) || ($parentType === null) !== ($parentIdValue === null)) {
+            throw new InvalidArgumentException('Reference owner tuple is malformed: owner type and owner id must both be present or both be null.');
         }
 
-        $this->deleteOwnMedia();
-        $this->deleteOwnContributors();
-
-        $this->newQueryWithoutScopes()->whereKey($this->getKey())->delete();
-        $this->fireModelEvent('deleted', false);
-    }
-
-    private function deleteOwnContributors(): void
-    {
-        ReferenceContributor::query()->where('reference_id', $this->getKey())->delete();
-    }
-
-    private function deleteOwnMedia(): void
-    {
-        Media::query()
-            ->where('model_type', $this->getMorphClass())
-            ->where('model_id', $this->getKey())
-            ->chunkById(100, static function ($media): void {
-                $media->each(static fn (Media $item): ?bool => $item->delete());
-            });
-    }
-
-    /**
-     * Order subtree ids children-first via one parent map (cycle-safe).
-     *
-     * @param  list<string>  $ids
-     * @return list<string>
-     */
-    private function childrenFirst(array $ids): array
-    {
-        /** @var array<string, string|null> $parents */
-        $parents = static::query()->withoutOwnerScope()->whereKey($ids)
-            ->pluck('parent_id', $this->getKeyName())
-            ->map(static fn (mixed $parentId): ?string => $parentId === null ? null : (string) $parentId)
-            ->all();
-
-        $ordered = [];
-        $visiting = [];
-        $visited = [];
-
-        $visit = function (string $id) use (&$visit, &$ordered, &$visiting, &$visited, $parents): void {
-            if (isset($visited[$id]) || isset($visiting[$id])) {
-                return;
+        if ($parentType === null) {
+            if ($childType === null) {
+                return $parent;
             }
 
-            $visiting[$id] = true;
-
-            foreach ($parents as $childId => $parentId) {
-                if ($parentId === $id) {
-                    $visit((string) $childId);
-                }
-            }
-
-            unset($visiting[$id]);
-            $visited[$id] = true;
-            $ordered[] = $id;
-        };
-
-        $visit((string) $this->getKey());
-
-        foreach ($ids as $id) {
-            $visit((string) $id);
+            return $config->includeGlobal && ! OwnerScopeOverride::suppressIncludeGlobal() ? $parent : null;
         }
 
-        return $ordered;
+        if ($childType === null) {
+            return null;
+        }
+
+        return $childType === $parentType && (string) $childId === (string) $parentIdValue ? $parent : null;
+    }
+
+    private function isWorkKind(Reference $reference): bool
+    {
+        return (string) ($reference->getAttributes()['record_kind'] ?? '') === ReferenceRecordKind::Work->value;
     }
 
     /**
-     * @return list<string>
+     * @return array{0: string|null, 1: string|int|null}
      */
-    private function collectSubtreeIds(): array
+    private function ownerTuple(Reference $reference): array
     {
-        $ids = [(string) $this->getKey()];
-        $frontier = $ids;
+        $config = static::ownerScopeConfig();
+        $ownerType = $reference->getAttribute($config->ownerTypeColumn);
+        $ownerId = $reference->getAttribute($config->ownerIdColumn);
 
-        while ($frontier !== []) {
-            $childIds = static::query()->withoutOwnerScope()
-                ->whereIn('parent_id', $frontier)
-                ->pluck($this->getKeyName())
-                ->map(static fn (mixed $id): string => (string) $id)
-                ->all();
-
-            $frontier = [];
-
-            foreach ($childIds as $childId) {
-                if (in_array($childId, $ids, true)) {
-                    continue;
-                }
-
-                $ids[] = $childId;
-                $frontier[] = $childId;
-            }
-        }
-
-        return $ids;
+        return [
+            $ownerType === null ? null : (string) $ownerType,
+            $ownerId,
+        ];
     }
 }

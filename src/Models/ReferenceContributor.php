@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace AIArmada\References\Models;
 
 use AIArmada\References\Enums\ReferenceContributorRole;
+use AIArmada\References\Persistence\ReferenceContributorPersistence;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
@@ -20,7 +21,7 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
  * @property-read Reference $reference
  * @property-read Model $contributor
  */
-class ReferenceContributor extends Model
+class ReferenceContributor extends ReferenceContributorPersistence
 {
     use HasUuids;
 
@@ -31,9 +32,24 @@ class ReferenceContributor extends Model
         'role',
     ];
 
+    protected static function booted(): void
+    {
+        static::addGlobalScope('referenceOwner', static function (Builder $query): void {
+            if (Reference::ownerScopeConfig()->enabled) {
+                $query->whereHas('reference');
+            }
+        });
+    }
+
     public function getTable(): string
     {
-        return config('references.database.tables.reference_contributors', 'reference_contributors');
+        if (is_string($this->table) && $this->table !== '') {
+            return $this->table;
+        }
+
+        $table = config('references.database.tables.reference_contributors');
+
+        return is_string($table) && $table !== '' ? $table : 'reference_contributors';
     }
 
     protected function casts(): array

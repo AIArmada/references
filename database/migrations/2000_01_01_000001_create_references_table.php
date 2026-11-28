@@ -2,8 +2,7 @@
 
 declare(strict_types=1);
 
-use AIArmada\CommerceSupport\Support\ConnectionDriver;
-use AIArmada\References\Support\ReferenceIdentityIndexes;
+use AIArmada\References\Persistence\ReferenceIdentityIndexes;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
@@ -15,7 +14,6 @@ return new class extends Migration
         $jsonType = commerce_json_column_type('references', 'jsonb');
         $tableName = (string) config('references.database.tables.references', 'references');
         $contributorsTable = (string) config('references.database.tables.reference_contributors', 'reference_contributors');
-        $driver = ConnectionDriver::name(Schema::getConnection());
         Schema::create($tableName, function (Blueprint $table) use ($jsonType): void {
             $table->uuid('id')->primary();
             $table->nullableUuidMorphs('owner');
@@ -53,10 +51,10 @@ return new class extends Migration
             $table->foreignUuid('reference_id')->index();
             $table->string('contributor_type');
             $table->foreignUuid('contributor_id');
-            $table->string('role', 20)->default('author')->index();
+            $table->string('role', 20)->index();
             $table->timestampsTz();
 
-            $table->index(['reference_id', 'role']);
+            $table->unique(['reference_id', 'role', 'contributor_type', 'contributor_id'], 'reference_contributors_identity_unique');
             $table->index(['contributor_type', 'contributor_id']);
         });
 
